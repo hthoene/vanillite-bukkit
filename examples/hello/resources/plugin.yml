@@ -1,0 +1,9 @@
+name: HelloBukkit
+version: 1.0.0
+main: dev.vanillite.examples.hello.HelloPlugin
+api-version: '26.3'
+description: A trivial Bukkit plugin that runs unchanged on Paper and on Vanillite's Bukkit layer.
+commands:
+  hellob:
+    description: Says hello now and again one second later.
+    aliases: [hb]

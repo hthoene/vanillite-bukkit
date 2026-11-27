@@ -1,0 +1,9 @@
+name: VBench
+version: 1.0.0
+main: dev.vanillite.examples.bench.BenchPlugin
+api-version: '26.3'
+description: Measures the cost of common Bukkit API calls; the same jar runs on Paper and on Vanillite.
+commands:
+  vbench:
+    description: Runs the measurements on the main thread (needs chunk 0 0 loaded and an entity near 0 65 0).
+    permission: vbench.run
