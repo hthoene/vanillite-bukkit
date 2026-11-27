@@ -9,5 +9,9 @@ cargo run -q -p vanillite-jvm --bin vanillite-jvm-bindgen -- --check vanillite-j
 fetch_libraries
 compile_java "$BUILD/check/jvm" "" vanillite-jvm/java/src
 compile_java "$BUILD/check/bukkit" "$BUILD/check/jvm:$CLASSPATH_LIBS" bukkit/src bukkit/test
+for compat in compat/*/; do
+    fetch_compat "$(basename "$compat")"
+    compile_java "$BUILD/check/compat-$(basename "$compat")" "$BUILD/check/jvm:$BUILD/check/bukkit:$CLASSPATH_LIBS:$CLASSPATH_COMPAT" "$compat/src"
+done
 compile_java "$BUILD/check/examples" "$CLASSPATH_LIBS" examples/hello/src examples/bench/src
 echo "quick check passed"

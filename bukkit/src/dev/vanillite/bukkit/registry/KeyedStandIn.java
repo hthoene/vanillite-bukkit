@@ -10,7 +10,7 @@ import org.bukkit.NamespacedKey;
  * A registry entry of an interface type the layer does not implement yet: it knows its key and
  * translation key; default methods run, every other method throws naming itself.
  */
-final class KeyedStandIn implements InvocationHandler {
+public final class KeyedStandIn implements InvocationHandler {
     private final NamespacedKey key;
     private final Class<?> type;
     private final String translationKey;
@@ -19,6 +19,12 @@ final class KeyedStandIn implements InvocationHandler {
         this.key = key;
         this.type = type;
         this.translationKey = translationKey(kind, key);
+    }
+
+    /** An entry of an interface type outside any registry (e.g. {@code Biome.CUSTOM}). */
+    @SuppressWarnings("unchecked")
+    public static <T> T create(Class<T> type, NamespacedKey key, String kind) {
+        return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type}, new KeyedStandIn(key, type, kind));
     }
 
     static String translationKey(String kind, NamespacedKey key) {

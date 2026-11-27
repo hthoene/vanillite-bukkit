@@ -54,7 +54,8 @@ public abstract class VPlayer extends CraftHumanEntity implements Player {
 
     @Override
     protected int worldId() {
-        var s = Native.scratch();
+        // Callers evaluate this between their own scratch allocations: keep those.
+        var s = Native.scratchKept();
         MemorySegment out = s.alloc(4);
         if (Host.player_world(Native.plugin, s.uuid(uuid), out) == Abi.status.OK) {
             int id = out.get(JAVA_INT, 0);
@@ -413,6 +414,216 @@ public abstract class VPlayer extends CraftHumanEntity implements Player {
 
     private org.bukkit.inventory.PlayerInventory inventory;
 
+    /** The hand slot ({@code /item} name) a running interaction is about, and its item. */
+    private String eventHandSlot;
+    private VItemStack eventHandItem;
+
+    void eventHand(String slot, org.bukkit.inventory.ItemStack item) {
+        eventHandSlot = slot;
+        eventHandItem = item == null || item.isEmpty() ? null : VItemStack.of(item);
+    }
+
+    /** The item of a slot the core lent out to the running interaction, or null. */
+    VItemStack eventSlot(String slot) {
+        return Events.depth > 0 && slot.equals(eventHandSlot) ? eventHandItem : null;
+    }
+
+    /** Elytra flight is not reported to plugins yet: never gliding. */
+    @Override
+    public boolean isGliding() {
+        return false;
+    }
+
+    /** The swimming pose is not reported to plugins yet: never swimming. */
+    @Override
+    public boolean isSwimming() {
+        return false;
+    }
+
+    /** Riding is not reported to plugins yet: no vehicle. */
+    @Override
+    public org.bukkit.entity.Entity getVehicle() {
+        return null;
+    }
+
+    @Override
+    public boolean isInsideVehicle() {
+        return false;
+    }
+
+    /** Level events (sounds, particles) are not sent for plugins yet: plugins' effects stay invisible. */
+    @Override
+    public void playEffect(org.bukkit.Location location, org.bukkit.Effect effect, int data) {}
+
+    @Override
+    public <T> void playEffect(org.bukkit.Location location, org.bukkit.Effect effect, T data) {}
+
+    @Override
+    public boolean isPlayerTimeRelative() {
+        return true;
+    }
+
+    @Override
+    public long getPlayerTimeOffset() {
+        return 0;
+    }
+
+    @Override
+    public org.bukkit.WeatherType getPlayerWeather() {
+        return null;
+    }
+
+    // ----- Menus
+
+    /** The menu the player has open (null: its own inventory), and one being opened by a plugin. */
+    VInventoryView openView;
+    VInventoryView pendingView;
+
+    /** The item in a slot of the open menu, null when no menu is open. */
+    VItemStack menuSlot(int slot) {
+        var s = Native.scratch();
+        var sink = Native.sink(s);
+        if (Host.menu_item(Ctx.current, worldId(), s.uuid(uuid), slot, sink) != Abi.status.OK) {
+            return null;
+        }
+        return VItemStack.fromSnbt(Native.sunk());
+    }
+
+    /** Puts an item into a slot of the open menu (after the running inventory event, if one runs). */
+    void sendMenuSlot(int slot, VItemStack stack) {
+        String snbt = stack == null ? "{}" : stack.toSnbt();
+        Runnable send = () -> {
+            var s = Native.scratch();
+            Host.menu_set_item(Ctx.current, worldId(), s.uuid(uuid), slot, s.str(snbt));
+        };
+        if (Events.inMenuEvent) {
+            Layer.server.scheduler.onWorld(worldId(), send);
+        } else {
+            send.run();
+        }
+    }
+
+    /** The player's own inventory as a view. */
+    private VInventoryView ownView() {
+        return VInventoryView.create(this, VMenuInventory.create(this, "minecraft:inventory"), Component.text("Crafting"));
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView getOpenInventory() {
+        return openView != null ? openView : ownView();
+    }
+
+    @Override
+    public org.bukkit.inventory.InventoryView openInventory(org.bukkit.inventory.Inventory inventory) {
+        if (inventory instanceof VPlayerInventory) {
+            return getOpenInventory();
+        }
+        if (!(inventory instanceof VCustomInventory custom)) {
+            throw new UnsupportedOperationException("Vanillite: only inventories made by Bukkit.createInventory can be opened yet");
+        }
+        VInventoryView view = VInventoryView.create(this, custom, custom.title);
+        openView(view);
+        return view;
+    }
+
+    @Override
+    public void openInventory(org.bukkit.inventory.InventoryView view) {
+        if (view instanceof VInventoryView v && v.top instanceof VCustomInventory) {
+            openView(VInventoryView.create(this, v.top, v.title));
+        } else if (view != null) {
+            openInventory(view.getTopInventory());
+        }
+    }
+
+    private void openView(VInventoryView view) {
+        Runnable open = () -> {
+            VCustomInventory custom = (VCustomInventory) view.top;
+            // The core's open event would re-enter this plugin call and be dropped: fire it here.
+            var opening = new org.bukkit.event.inventory.InventoryOpenEvent(view);
+            Layer.server.pluginManager.callEvent(opening);
+            if (opening.isCancelled()) {
+                return;
+            }
+            // Serialising items may use the scratch arena itself: build every text before it.
+            String menuType = custom.menuType();
+            String title = Texts.json(view.title);
+            String items = custom.itemsSnbt();
+            int w = worldId();
+            var s = Native.scratch();
+            MemorySegment spec = s.alloc(Abi.MenuSpec.SIZE);
+            spec.fill((byte) 0);
+            spec.set(JAVA_INT, Abi.MenuSpec.size, (int) Abi.MenuSpec.SIZE);
+            MemorySegment.copy(s.str(menuType), 0, spec, Abi.MenuSpec.menu_type, Abi.Str.SIZE);
+            MemorySegment.copy(s.str(title), 0, spec, Abi.MenuSpec.title, Abi.Str.SIZE);
+            spec.set(JAVA_INT, Abi.MenuSpec.format, Abi.text_format.JSON);
+            MemorySegment.copy(s.str(items), 0, spec, Abi.MenuSpec.items, Abi.Str.SIZE);
+            pendingView = view;
+            int status = Host.menu_open(Ctx.current, w, s.uuid(uuid), spec, s.alloc(4));
+            if (status != Abi.status.OK) {
+                Native.log(Abi.log_level.WARN, "Could not open a menu for " + name + " (status " + status + ")");
+            }
+            if (status == Abi.status.OK) {
+                if (openView != null && openView.top instanceof VCustomInventory old) {
+                    old.viewers.remove(this);
+                }
+                if (pendingView == view) {
+                    openView = view;
+                    custom.viewers.add(this);
+                }
+            }
+            pendingView = null;
+        };
+        if (Events.inMenuEvent) {
+            Layer.server.scheduler.onWorld(worldId(), open);
+        } else {
+            open.run();
+        }
+    }
+
+    /** The open menu closed (its event, or the player left). */
+    void menuClosed() {
+        if (openView != null && openView.top instanceof VCustomInventory custom) {
+            custom.viewers.remove(this);
+        }
+        openView = null;
+    }
+
+    @Override
+    public void closeInventory(org.bukkit.event.inventory.InventoryCloseEvent.Reason reason) {
+        Runnable close = () -> {
+            VInventoryView view = openView;
+            int w = worldId();
+            Host.menu_close(Ctx.current, w, Native.scratch().uuid(uuid));
+            // The core's close event re-enters this plugin call and is dropped: fire it here.
+            if (view != null) {
+                Layer.server.pluginManager.callEvent(new org.bukkit.event.inventory.InventoryCloseEvent(view, reason));
+            }
+            menuClosed();
+        };
+        if (Events.inMenuEvent) {
+            Layer.server.scheduler.onWorld(worldId(), close);
+        } else {
+            close.run();
+        }
+    }
+
+    @Override
+    public void closeInventory() {
+        closeInventory(org.bukkit.event.inventory.InventoryCloseEvent.Reason.PLUGIN);
+    }
+
+    @Override
+    public org.bukkit.inventory.ItemStack getItemOnCursor() {
+        return openView != null ? openView.getCursor() : VItemStack.empty();
+    }
+
+    @Override
+    public void setItemOnCursor(org.bukkit.inventory.ItemStack item) {
+        if (openView != null) {
+            openView.cursor(item);
+        }
+    }
+
     @Override
     public org.bukkit.inventory.PlayerInventory getInventory() {
         if (inventory == null) {
@@ -428,12 +639,31 @@ public abstract class VPlayer extends CraftHumanEntity implements Player {
 
     // ----- Game state
 
+    /**
+     * The last value read per property. While the player's own action fires an event (breaking,
+     * placing, using), the core lends the player out and its properties cannot be read; handlers
+     * then see the last known value (Vanilla's defaults before the first read).
+     */
+    private final double[] lastProps = {0, 20, 20, 20, 5, 0, 0, 0, 0, 0, 0, 0, 0.05, 0.1, 0, 300, 0};
+
     double get(int prop) {
         int w = worldId();
         var s = Native.scratch();
         MemorySegment out = s.alloc(8);
-        Ctx.check(Host.player_get(Ctx.current, w, s.uuid(uuid), prop, out), "Player property " + prop);
-        return out.get(JAVA_DOUBLE, 0);
+        int status = Host.player_get(Ctx.current, w, s.uuid(uuid), prop, out);
+        boolean known = prop > 0 && prop < lastProps.length;
+        if (status == Abi.status.OK) {
+            double v = out.get(JAVA_DOUBLE, 0);
+            if (known) {
+                lastProps[prop] = v;
+            }
+            return v;
+        }
+        if (known && Events.depth > 0 && (status == Abi.status.NOT_FOUND || status == Abi.status.WRONG_OWNER)) {
+            return lastProps[prop];
+        }
+        Ctx.check(status, "Player property " + prop);
+        return 0;
     }
 
     void set(int prop, double value) {

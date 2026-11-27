@@ -9,6 +9,7 @@ org.yaml:snakeyaml:2.2 3af797a25458550a16bf89acc8e4ab2b7f2bfce0
 org.joml:joml:1.10.9 438e036486bad66b189bff385dd07dea4f74a146
 it.unimi.dsi:fastutil:8.5.18 a6cff377eecc19c2037bf31568a6d7106b50ba1f
 org.apache.logging.log4j:log4j-api:2.26.0 ad52af0ecf054a7e3f275a2e180ee06d9c490951
+org.apache.logging.log4j:log4j-to-jul:2.26.0 e758856d8aa6ae9a3d841d7fc77accd734eddf49
 org.slf4j:slf4j-api:2.0.17 d9e58ac9c7779ba3bf8142aff6c830617a7fe60f
 com.mojang:brigadier:1.3.11 3373d1e7bf00c8b99bed1ea4efb8c47344e4a887
 net.md-5:bungeecord-chat:1.21-R0.2-deprecated+build.21 a87a9222a1dcfa429b4a06264899f65313a4ed5c

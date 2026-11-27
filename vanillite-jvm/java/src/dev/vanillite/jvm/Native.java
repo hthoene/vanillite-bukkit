@@ -192,6 +192,14 @@ public final class Native {
         return SCRATCH.get().reset();
     }
 
+    /**
+     * The calling thread's scratch memory as it is: for a helper that may run while its caller's
+     * arguments live in the scratch (its allocations come after theirs).
+     */
+    public static Scratch scratchKept() {
+        return SCRATCH.get();
+    }
+
     /** Reads a {@code Str} record. */
     public static String string(MemorySegment str) {
         long len = str.get(JAVA_LONG, Abi.Str.len);

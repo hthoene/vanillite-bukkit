@@ -59,7 +59,21 @@ public final class Layer implements JvmPlugin {
         for (Handler h : logger.getHandlers()) {
             logger.removeHandler(h);
         }
-        logger.addHandler(new Handler() {
+        logger.addHandler(handler("[" + name + "] "));
+        return logger;
+    }
+
+    /** Sends what reaches the root logger (plugin libraries, Log4j through its JUL bridge) to the server log. */
+    static void rootLogger() {
+        Logger root = Logger.getLogger("");
+        for (Handler h : root.getHandlers()) {
+            root.removeHandler(h);
+        }
+        root.addHandler(handler(""));
+    }
+
+    private static Handler handler(String prefix) {
+        return new Handler() {
             @Override
             public void publish(LogRecord r) {
                 int level = r.getLevel().intValue() >= Level.SEVERE.intValue() ? Abi.log_level.ERROR
@@ -73,7 +87,7 @@ public final class Layer implements JvmPlugin {
                         // keep the pattern
                     }
                 }
-                String text = "[" + name + "] " + message;
+                String text = prefix + message;
                 if (r.getThrown() != null) {
                     text += "\n" + Native.trace(r.getThrown());
                 }
@@ -85,8 +99,7 @@ public final class Layer implements JvmPlugin {
 
             @Override
             public void close() {}
-        });
-        return logger;
+        };
     }
 
     /** A plugin jar and its description. */
@@ -95,6 +108,7 @@ public final class Layer implements JvmPlugin {
     @Override
     public void load() throws Exception {
         long start = System.nanoTime();
+        rootLogger();
         Impl.of(VBridge.class);
         Impl.of(VPluginLoader.class);
         server = Impl.create(org.bukkit.craftbukkit.CraftServer.class);
@@ -136,6 +150,7 @@ public final class Layer implements JvmPlugin {
             Commands.providePermissions();
         }
         Commands.register();
+        WorldEvents.implied(kinds);
         Events.subscribe(kinds);
         Native.log(Abi.log_level.INFO, "Loaded " + plugins.size() + " Bukkit plugin(s) in "
                 + (System.nanoTime() - start) / 1_000_000 + " ms; native events " + kinds);
@@ -299,6 +314,7 @@ public final class Layer implements JvmPlugin {
         File data = new File(c.file.getParentFile(), description.getName());
         var loader = new VPluginClassLoader(c.file, description, data, logger(description.getPrefix() != null
                 ? description.getPrefix() : description.getName()), Layer.class.getClassLoader(), libraries);
+        attachCompat(description.getName(), loader);
         Thread thread = Thread.currentThread();
         ClassLoader previous = thread.getContextClassLoader();
         thread.setContextClassLoader(loader);
@@ -323,6 +339,22 @@ public final class Layer implements JvmPlugin {
         } finally {
             thread.setContextClassLoader(previous);
         }
+    }
+
+    /**
+     * Plugins that reach into a server's internals get the layer's adapter for them, when it has one
+     * ({@code compat/<plugin>.jar}): it joins the plugin's class path and the plugin is told to use it.
+     */
+    private static void attachCompat(String plugin, VPluginClassLoader loader) throws java.net.MalformedURLException {
+        Path jar = Path.of(System.getProperty("vanillite.jvm.dir"), "compat", plugin.toLowerCase(java.util.Locale.ROOT) + ".jar");
+        if (!Files.isRegularFile(jar)) {
+            return;
+        }
+        loader.addCompat(jar.toUri().toURL());
+        if (plugin.equals("WorldEdit")) {
+            System.setProperty("worldedit.bukkit.adapter", "dev.vanillite.bukkit.compat.worldedit.VanilliteAdapter");
+        }
+        Native.log(Abi.log_level.INFO, "Vanillite adapter for " + plugin + " attached");
     }
 
     private static final java.lang.reflect.Constructor<org.bukkit.command.PluginCommand> NEW_COMMAND;
@@ -420,10 +452,26 @@ public final class Layer implements JvmPlugin {
         Ctx.current = ctx;
         Native.epoch++;
         try {
-            server.discoverWorlds();
+            // As Paper: STARTUP plugins see no worlds yet; the worlds then load (WorldInitEvent,
+            // WorldLoadEvent), then the POSTWORLD plugins are enabled and the server is loaded.
+            List<JavaPlugin> postWorld = new ArrayList<>();
             for (JavaPlugin p : plugins) {
+                if (p.getDescription().getLoad() == PluginLoadOrder.STARTUP) {
+                    server.pluginManager.enablePlugin(p);
+                } else {
+                    postWorld.add(p);
+                }
+            }
+            server.discoverWorlds();
+            for (org.bukkit.World w : server.getWorlds()) {
+                server.pluginManager.callEvent(new org.bukkit.event.world.WorldInitEvent(w));
+                server.pluginManager.callEvent(new org.bukkit.event.world.WorldLoadEvent(w));
+            }
+            for (JavaPlugin p : postWorld) {
                 server.pluginManager.enablePlugin(p);
             }
+            server.pluginManager.callEvent(new org.bukkit.event.server.ServerLoadEvent(
+                    org.bukkit.event.server.ServerLoadEvent.LoadType.STARTUP));
             server.pluginManager.dirtyPermissibles();
             return Abi.status.OK;
         } finally {

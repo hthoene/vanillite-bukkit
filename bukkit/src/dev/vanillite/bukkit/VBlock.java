@@ -31,6 +31,16 @@ public abstract class VBlock implements Block {
         this.z = z;
     }
 
+    /** A fixed state this block reports (a block about to be placed), -1 to read the world. */
+    private int fixedState = -1;
+
+    /** A block that reports {@code state} instead of the world's (Bukkit fires place events after placing). */
+    static Block withState(VWorld world, int x, int y, int z, int state) {
+        VBlock b = (VBlock) create(world, x, y, z);
+        b.fixedState = state;
+        return b;
+    }
+
     static Block create(VWorld world, int x, int y, int z) {
         try {
             return (VBlock) NEW.invokeExact(world, x, y, z);
@@ -49,6 +59,9 @@ public abstract class VBlock implements Block {
 
     /** The block state id here. */
     public int stateId() {
+        if (fixedState >= 0) {
+            return fixedState;
+        }
         var s = Native.scratch();
         MemorySegment out = s.alloc(4);
         int status = Host.block_get_id(Ctx.current, world.id, pos(s), out);
@@ -74,6 +87,56 @@ public abstract class VBlock implements Block {
         int state = Materials.state(type);
         Ctx.check(Host.block_set_id(Ctx.current, world.id, pos(Native.scratch()), state,
                 applyPhysics ? Abi.set_mode.UPDATE : Abi.set_mode.NO_PHYSICS), "Block.setType");
+    }
+
+    @Override
+    public org.bukkit.block.data.BlockData getBlockData() {
+        return VBlockData.of(stateId());
+    }
+
+    @Override
+    public void setBlockData(org.bukkit.block.data.BlockData data) {
+        setBlockData(data, true);
+    }
+
+    @Override
+    public void setBlockData(org.bukkit.block.data.BlockData data, boolean applyPhysics) {
+        Ctx.check(Host.block_set_id(Ctx.current, world.id, pos(Native.scratch()), ((VBlockData) data).state,
+                applyPhysics ? Abi.set_mode.UPDATE : Abi.set_mode.NO_PHYSICS), "Block.setBlockData");
+    }
+
+    @Override
+    public org.bukkit.block.BlockState getState() {
+        return VBlockState.create(world, x, y, z, stateId());
+    }
+
+    @Override
+    public org.bukkit.block.BlockState getState(boolean useSnapshot) {
+        return getState();
+    }
+
+    @Override
+    public boolean isEmpty() {
+        return getType().isAir();
+    }
+
+    @Override
+    public boolean isLiquid() {
+        Material m = getType();
+        return m == Material.WATER || m == Material.LAVA;
+    }
+
+    @Override
+    public org.bukkit.block.Biome getBiome() {
+        String key = NativeAccess.biome(world, x, y, z);
+        org.bukkit.NamespacedKey k = key == null ? null : org.bukkit.NamespacedKey.fromString(key);
+        org.bukkit.block.Biome b = k == null ? null : org.bukkit.Registry.BIOME.get(k);
+        return b != null ? b : org.bukkit.block.Biome.PLAINS;
+    }
+
+    @Override
+    public boolean isPassable() {
+        return !getType().isSolid();
     }
 
     @Override

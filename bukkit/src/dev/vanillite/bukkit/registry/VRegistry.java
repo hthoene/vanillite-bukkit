@@ -66,13 +66,50 @@ final class VRegistry<T extends Keyed> implements Registry<T> {
         String kind = registry.key().value();
         String prefix = kind.substring(kind.lastIndexOf('/') + 1);
         if (type.isInterface()) {
-            return k -> (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type},
-                    new KeyedStandIn(k, type, prefix));
+            Class<?>[][] faces = {standInInterfaces(type)};
+            return k -> {
+                // The type's own static constants read this registry: initialise it first, so a
+                // proxy is never made while its class is half initialised.
+                initialize(type);
+                try {
+                    return (T) Proxy.newProxyInstance(type.getClassLoader(), faces[0], new KeyedStandIn(k, type, prefix));
+                } catch (RuntimeException | Error e) {
+                    if (faces[0].length == 1) {
+                        throw e;
+                    }
+                    // A sub-interface the proxy cannot implement: fall back to the type alone.
+                    faces[0] = new Class<?>[] {type};
+                    return (T) Proxy.newProxyInstance(type.getClassLoader(), faces[0], new KeyedStandIn(k, type, prefix));
+                }
+            };
         }
         if (Modifier.isAbstract(type.getModifiers())) {
             return k -> (T) KeyedClasses.create(type, k, prefix);
         }
         return k -> null;
+    }
+
+    private static void initialize(Class<?> type) {
+        try {
+            Class.forName(type.getName(), true, type.getClassLoader());
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * The interfaces a stand-in implements: the type and its nested sub-interfaces (e.g.
+     * {@code MenuType.Typed}), because API constants cast registry entries to those.
+     */
+    private static Class<?>[] standInInterfaces(Class<?> type) {
+        java.util.List<Class<?>> out = new java.util.ArrayList<>();
+        out.add(type);
+        for (Class<?> c : type.getClasses()) {
+            if (c.isInterface() && type.isAssignableFrom(c)) {
+                out.add(c);
+            }
+        }
+        return out.toArray(Class<?>[]::new);
     }
 
     private static NamespacedKey keyOf(Keyed keyed) {

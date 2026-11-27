@@ -51,6 +51,25 @@ fetch_libraries() {
     CLASSPATH_LIBS="${CLASSPATH_LIBS#:}"
 }
 
+# Downloads the compile-time jars of a compat module (compat/<name>/libraries.txt: <url> <sha1>)
+# into the cache and sets CLASSPATH_COMPAT to them. Never shipped.
+fetch_compat() {
+    CLASSPATH_COMPAT=""
+    local url sha file
+    while read -r url sha; do
+        [[ -z "$url" || "$url" == \#* ]] && continue
+        file="$CACHE/compat/$sha.jar"
+        if [[ ! -f "$file" ]] || [[ "$(sha1sum "$file" | cut -d' ' -f1)" != "$sha" ]]; then
+            mkdir -p "$(dirname "$file")"
+            curl -fsSL -o "$file.part" "$url" && [[ "$(sha1sum "$file.part" | cut -d' ' -f1)" == "$sha" ]] \
+                || { rm -f "$file.part"; echo "cannot download $url" >&2; exit 1; }
+            mv "$file.part" "$file"
+        fi
+        CLASSPATH_COMPAT="$CLASSPATH_COMPAT:$file"
+    done <"compat/$1/libraries.txt"
+    CLASSPATH_COMPAT="${CLASSPATH_COMPAT#:}"
+}
+
 # Compiles Java sources: compile_java <out dir> <class path> <source dir>...
 compile_java() {
     local out="$1" cp="$2"
@@ -58,6 +77,6 @@ compile_java() {
     rm -rf "$out"
     mkdir -p "$out"
     # shellcheck disable=SC2046
-    "$JAVAC" --release 25 -encoding UTF-8 -Xlint:all,-deprecation,-removal,-serial,-processing,-options,-restricted -Werror \
+    "$JAVAC" --release 25 -encoding UTF-8 -Xlint:all,-deprecation,-removal,-serial,-processing,-options,-restricted,-path -Werror \
         -cp "$cp" -d "$out" $(find "$@" -name '*.java')
 }

@@ -14,6 +14,11 @@ public final class Texts {
         return GsonComponentSerializer.gson().serialize(c);
     }
 
+    /** A legacy string with section-sign codes as a component. */
+    public static Component legacy(String s) {
+        return LegacyComponentSerializer.legacySection().deserialize(s == null ? "" : s);
+    }
+
     /** JSON of a legacy string with section-sign codes. */
     public static String legacyJson(String s) {
         return json(LegacyComponentSerializer.legacySection().deserialize(s));
