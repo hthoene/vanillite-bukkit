@@ -132,8 +132,20 @@ public abstract class VEntity implements Entity {
 
     @Override
     public int getEntityId() {
-        return uuid.hashCode();
+        if (networkId == 0) {
+            // Abi.entity_prop.NETWORK_ID (ABI 1.12); the id stays the entity's for its life.
+            double id = prop(22, 0);
+            if (id > 0) {
+                networkId = (int) id;
+            } else {
+                return uuid.hashCode();
+            }
+        }
+        return networkId;
     }
+
+    /** The network id once read; 0 before. */
+    private volatile int networkId;
 
     // ----- Metadata (Metadatable): kept per entity UUID for the server's lifetime, as Bukkit's
     // entity metadata store does.
