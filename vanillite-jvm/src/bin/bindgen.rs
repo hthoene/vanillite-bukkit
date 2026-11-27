@@ -326,9 +326,19 @@ fn host_java(g: &Gen) -> String {
                 ),
                 None => ("void", format!("H_{name}.H.invokeExact({pass});")),
             };
+            // A call that may change the world or call back into plugins starts and ends a new
+            // epoch: values read from the host before it are stale afterwards.
+            let (enter, leave) = if critical {
+                ("", "")
+            } else {
+                (
+                    "Native.epoch++;\n        ",
+                    " finally {\n            Native.epoch++;\n        }",
+                )
+            };
             let _ = writeln!(
                 out,
-                "    /** Host function {} ({}). */\n    public static {rt} {}({decl}) {{\n        try {{\n            {call}\n        }} catch (Throwable t) {{\n            throw Native.rethrow(t);\n        }}\n    }}\n",
+                "    /** Host function {} ({}). */\n    public static {rt} {}({decl}) {{\n        {enter}try {{\n            {call}\n        }} catch (Throwable t) {{\n            throw Native.rethrow(t);\n        }}{leave}\n    }}\n",
                 f.name,
                 if crit { "critical" } else { "normal" },
                 ident(&name)

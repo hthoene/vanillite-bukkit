@@ -48,3 +48,4 @@ org.apache.httpcomponents:httpclient:4.5.14 1194890e6f56ec29177673f2f12d0b8e627d
 org.apache.httpcomponents:httpcore:4.4.16 51cf043c87253c9f58b539c9f7e44c8894223850
 commons-codec:commons-codec:1.16.0 4e3eb3d79888d76b54e28b350915b5dc3919c9de
 org.slf4j:jcl-over-slf4j:1.7.36 d877e195a05aca4a2f1ad2ff14bfec1393af4b5e
+com.googlecode.json-simple:json-simple:1.1.1 c9ad4a0850ab676c5c64461a05ca524cdfff59f1

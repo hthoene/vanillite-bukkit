@@ -103,6 +103,7 @@ final class Commands {
     private static int execute(MemorySegment user, MemorySegment ctx, MemorySegment invocation, MemorySegment result) {
         MemorySegment previous = Ctx.current;
         Ctx.current = ctx;
+        Native.epoch++;
         try {
             MemorySegment inv = invocation.reinterpret(Abi.CommandInvocation.SIZE);
             int number = inv.get(JAVA_INT, Abi.CommandInvocation.command);
@@ -121,6 +122,7 @@ final class Commands {
             return Abi.status.ERROR;
         } finally {
             Ctx.current = previous;
+            Native.epoch++;
         }
         return Abi.status.OK;
     }
@@ -151,6 +153,7 @@ final class Commands {
     private static int suggest(MemorySegment user, MemorySegment ctx, MemorySegment request, MemorySegment sink) {
         MemorySegment previous = Ctx.current;
         Ctx.current = ctx;
+        Native.epoch++;
         try {
             MemorySegment req = request.reinterpret(Abi.SuggestRequest.SIZE);
             int number = req.get(JAVA_INT, Abi.SuggestRequest.provider);
@@ -184,6 +187,7 @@ final class Commands {
             Native.log(Abi.log_level.WARN, "Tab completion failed: " + Native.trace(t));
         } finally {
             Ctx.current = previous;
+            Native.epoch++;
         }
         return Abi.status.OK;
     }

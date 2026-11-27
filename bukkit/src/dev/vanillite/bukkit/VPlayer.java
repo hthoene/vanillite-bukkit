@@ -343,6 +343,89 @@ public abstract class VPlayer extends CraftHumanEntity implements Player {
         }
     }
 
+    @Override
+    public org.bukkit.Location getRespawnLocation() {
+        // Respawn points (beds, anchors, /spawnpoint) are not exposed by the server yet.
+        return null;
+    }
+
+    @Override
+    public org.bukkit.Location getRespawnLocation(boolean load) {
+        return null;
+    }
+
+    @Override
+    public boolean canSee(Player player) {
+        // Hiding players (hidePlayer) is not supported yet: everyone sees everyone.
+        return true;
+    }
+
+    @Override
+    public boolean canSee(org.bukkit.entity.Entity entity) {
+        return true;
+    }
+
+    @Override
+    public String getLocale() {
+        // The client's language is not exposed by the server yet.
+        return "en_us";
+    }
+
+    @Override
+    public java.util.Locale locale() {
+        return java.util.Locale.US;
+    }
+
+    @Override
+    public org.bukkit.scoreboard.Scoreboard getScoreboard() {
+        return Layer.server.getScoreboardManager().getMainScoreboard();
+    }
+
+    @Override
+    public float getFlySpeed() {
+        return (float) get(Abi.player_prop.FLY_SPEED) * 2;
+    }
+
+    @Override
+    public void setFlySpeed(float value) {
+        if (value < -1 || value > 1) {
+            throw new IllegalArgumentException(value + " is not between -1 and 1");
+        }
+        if (Math.abs(value / 2 - get(Abi.player_prop.FLY_SPEED)) > 1e-6) {
+            set(Abi.player_prop.FLY_SPEED, value / 2);
+        }
+    }
+
+    @Override
+    public float getWalkSpeed() {
+        return (float) get(Abi.player_prop.WALK_SPEED) * 2;
+    }
+
+    @Override
+    public void setWalkSpeed(float value) {
+        if (value < -1 || value > 1) {
+            throw new IllegalArgumentException(value + " is not between -1 and 1");
+        }
+        if (Math.abs(value / 2 - get(Abi.player_prop.WALK_SPEED)) > 1e-6) {
+            set(Abi.player_prop.WALK_SPEED, value / 2);
+        }
+    }
+
+    private org.bukkit.inventory.PlayerInventory inventory;
+
+    @Override
+    public org.bukkit.inventory.PlayerInventory getInventory() {
+        if (inventory == null) {
+            inventory = VPlayerInventory.create(this);
+        }
+        return inventory;
+    }
+
+    @Override
+    public void updateCommands() {
+        Host.player_update_commands(Native.plugin, Native.scratch().uuid(uuid));
+    }
+
     // ----- Game state
 
     double get(int prop) {
@@ -361,7 +444,12 @@ public abstract class VPlayer extends CraftHumanEntity implements Player {
 
     @Override
     public GameMode getGameMode() {
-        int mode = (int) get(Abi.player_prop.GAME_MODE);
+        // player_info answers on any thread (LuckPerms reads the game mode asynchronously).
+        var s = Native.scratch();
+        MemorySegment info = s.alloc(Abi.PlayerInfo.SIZE);
+        info.set(JAVA_INT, Abi.PlayerInfo.size, (int) Abi.PlayerInfo.SIZE);
+        Ctx.check(Host.player_info(Native.plugin, s.uuid(uuid), info), "Player.getGameMode");
+        int mode = info.get(JAVA_INT, Abi.PlayerInfo.game_mode);
         return switch (mode) {
             case 1 -> GameMode.CREATIVE;
             case 2 -> GameMode.ADVENTURE;

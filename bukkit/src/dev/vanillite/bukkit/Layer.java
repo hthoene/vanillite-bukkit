@@ -418,6 +418,7 @@ public final class Layer implements JvmPlugin {
     public int enable(MemorySegment ctx) {
         MemorySegment previous = Ctx.current;
         Ctx.current = ctx;
+        Native.epoch++;
         try {
             server.discoverWorlds();
             for (JavaPlugin p : plugins) {
@@ -427,6 +428,7 @@ public final class Layer implements JvmPlugin {
             return Abi.status.OK;
         } finally {
             Ctx.current = previous;
+            Native.epoch++;
         }
     }
 
@@ -434,12 +436,15 @@ public final class Layer implements JvmPlugin {
     public int disable(MemorySegment ctx) {
         MemorySegment previous = Ctx.current;
         Ctx.current = ctx;
+        Native.epoch++;
         try {
+            server.stopping = true;
             server.pluginManager.disablePlugins();
             server.scheduler.cancelTasks(null);
             return Abi.status.OK;
         } finally {
             Ctx.current = previous;
+            Native.epoch++;
         }
     }
 }

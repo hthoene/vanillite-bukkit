@@ -17,6 +17,12 @@ as on Paper; the layer is also the server's permission provider. Commands use Bu
 one of the same name. Events: pre-login/login, join, quit, chat (`AsyncPlayerChatEvent`,
 `AsyncChatEvent`), command preprocess, teleport, respawn, block break; Bukkit priorities
 interleave with native plugins. Services, plugin messaging and offline players are there.
+Paper's registries (`Registry.BLOCK`, `ITEM`, enchantments, effects, sounds, ...) and tags
+(`Tag.*`) come from the server's registries and data packs; block and item types carry their
+Vanilla facts (hardness, blast resistance, stack size, ...). Worlds have chunks (handles), the
+world border and heights; players have speeds, metadata, passengers and the main scoreboard's
+teams (by name). EssentialsX (with Chat and Spawn), LuckPerms and Vault run: homes, warps,
+spawn, `/tpa`, `/msg`, chat formats with LuckPerms prefixes.
 Every other API method throws an `UnsupportedOperationException` that names it.
 
 ## Layout

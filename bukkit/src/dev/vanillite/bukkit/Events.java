@@ -137,6 +137,7 @@ final class Events {
     private static int event(MemorySegment user, MemorySegment ctx, MemorySegment header) {
         MemorySegment previous = Ctx.current;
         Ctx.current = ctx;
+        Native.epoch++;
         EventPriority priority = PRIORITIES[(int) user.address()];
         long key = header.address();
         try {
@@ -161,6 +162,7 @@ final class Events {
             Native.log(Abi.log_level.ERROR, "Event dispatch failed: " + Native.trace(t));
         } finally {
             Ctx.current = previous;
+            Native.epoch++;
         }
         return Abi.status.OK;
     }

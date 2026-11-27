@@ -24,7 +24,9 @@ public final class SelfTest {
     public static void main(String[] args) throws Throwable {
         for (Class<?> c : new Class<?>[] {VServer.class, VWorld.class, VBlock.class, VEntity.class, VPlayer.class,
                 VConsole.class, VPluginManager.class, VScheduler.class, VBridge.class, VOfflinePlayer.class, VProfile.class,
-                org.bukkit.craftbukkit.CraftServer.class}) {
+                VChunk.class, VWorldBorder.class, VUnsafe.class, VScoreboard.class, VScoreboard.VTeam.class,
+                VPlayerInventory.class, dev.vanillite.bukkit.registry.VBlockType.class,
+                dev.vanillite.bukkit.registry.VItemType.class, org.bukkit.craftbukkit.CraftServer.class}) {
             Class<?> impl = Impl.of(c);
             check(c.isAssignableFrom(impl) && !java.lang.reflect.Modifier.isAbstract(impl.getModifiers()),
                     "generated " + impl.getName());

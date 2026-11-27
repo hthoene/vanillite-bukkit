@@ -87,12 +87,14 @@ public abstract class VScheduler implements BukkitScheduler {
         }
         MemorySegment previous = Ctx.current;
         Ctx.current = ctx;
+        Native.epoch++;
         try {
             task.body.run();
         } catch (Throwable t) {
             Native.log(Abi.log_level.WARN, "Task #" + task.id + " of " + (task.plugin == null ? "the layer" : task.plugin.getName()) + " threw: " + Native.trace(t));
         } finally {
             Ctx.current = previous;
+            Native.epoch++;
             if (!task.repeating) {
                 TASKS.remove(task.id);
             }

@@ -137,6 +137,9 @@ public abstract class VPluginManager implements org.bukkit.plugin.PluginManager 
         try {
             Native.log(Abi.log_level.INFO, "Enabling " + plugin.getPluginMeta().getDisplayName());
             SET_ENABLED.invoke(java, true);
+            if (plugin.isEnabled()) {
+                callEvent(new org.bukkit.event.server.PluginEnableEvent(plugin));
+            }
         } catch (java.lang.reflect.InvocationTargetException e) {
             Native.log(Abi.log_level.ERROR, "Error enabling " + plugin.getName() + ": " + Native.trace(e.getCause()));
         } catch (Throwable t) {
@@ -155,6 +158,11 @@ public abstract class VPluginManager implements org.bukkit.plugin.PluginManager 
             Native.log(Abi.log_level.ERROR, "Error disabling " + plugin.getName() + ": " + Native.trace(e.getCause()));
         } catch (Throwable t) {
             Native.log(Abi.log_level.ERROR, "Error disabling " + plugin.getName() + ": " + Native.trace(t));
+        }
+        try {
+            callEvent(new org.bukkit.event.server.PluginDisableEvent(plugin));
+        } catch (Throwable t) {
+            Native.log(Abi.log_level.ERROR, "Error passing PluginDisableEvent of " + plugin.getName() + ": " + Native.trace(t));
         }
         Layer.server.scheduler.cancelTasks(plugin);
         Layer.server.services.unregisterAll(plugin);
