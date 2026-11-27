@@ -473,6 +473,7 @@ public final class Layer implements JvmPlugin {
             for (JavaPlugin p : postWorld) {
                 server.pluginManager.enablePlugin(p);
             }
+            PaperCommands.start();
             server.pluginManager.callEvent(new org.bukkit.event.server.ServerLoadEvent(
                     org.bukkit.event.server.ServerLoadEvent.LoadType.STARTUP));
             server.pluginManager.dirtyPermissibles();

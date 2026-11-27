@@ -25,7 +25,8 @@ public abstract class VBridge implements InternalAPIBridge {
         return new LifecycleEventManager<>() {
             @Override
             public void registerEventHandler(LifecycleEventHandlerConfiguration<? super Plugin> config) {
-                // Lifecycle events (Brigadier command registration, ...) are not supported yet.
+                // COMMANDS runs once the plugins of the start are enabled; others are never fired.
+                PaperCommands.add(plugin, config);
             }
         };
     }
