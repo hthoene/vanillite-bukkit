@@ -23,6 +23,8 @@ const CRITICAL: &[&str] = &[
     "entity_location",
     "entity_get",
     "player_get",
+    "entities_in_box",
+    "entity_type_name",
 ];
 
 const JAVA_KEYWORDS: &[&str] = &[

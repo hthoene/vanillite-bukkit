@@ -75,7 +75,7 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "vanillite-abi"
 version = "0.1.0-beta.1"
-source = "git+https://github.com/hthoene/vanillite?branch=dev#7acb28c20641a613277d2f4f53edab0a0f855c77"
+source = "git+https://github.com/hthoene/vanillite?branch=dev#a4c8fd30c8e339cc414efdaec2e193a088e97b66"
 
 [[package]]
 name = "vanillite-jvm"

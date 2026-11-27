@@ -100,7 +100,16 @@ public abstract class VScheduler implements BukkitScheduler {
         return Abi.status.OK;
     }
 
+    /** Runs {@code body} in the next tick of a world, on its owner. */
+    void onWorld(int world, Runnable body) {
+        sync(null, body, 0, 0, world);
+    }
+
     private Task sync(Plugin plugin, Runnable body, long delay, long period) {
+        return sync(plugin, body, delay, period, 0);
+    }
+
+    private Task sync(Plugin plugin, Runnable body, long delay, long period, int world) {
         Task task = new Task(plugin, body, true, period > 0);
         TASKS.put(task.id, task);
         var s = Native.scratch();
@@ -108,7 +117,7 @@ public abstract class VScheduler implements BukkitScheduler {
         spec.fill((byte) 0);
         spec.set(JAVA_INT, Abi.TaskSpec.size, (int) Abi.TaskSpec.SIZE);
         spec.set(JAVA_INT, Abi.TaskSpec.owner + Abi.Owner.kind, Abi.owner.WORLD);
-        spec.set(JAVA_INT, Abi.TaskSpec.owner + Abi.Owner.world, 0);
+        spec.set(JAVA_INT, Abi.TaskSpec.owner + Abi.Owner.world, world);
         spec.set(JAVA_LONG, Abi.TaskSpec.delay, Math.max(delay, 0));
         spec.set(JAVA_LONG, Abi.TaskSpec.period, Math.max(period, 0));
         spec.set(ADDRESS, Abi.TaskSpec.run, RUN);
