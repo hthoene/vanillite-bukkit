@@ -98,6 +98,20 @@ main-jar = "vanillite-bukkit.jar"
 main-class = "dev.vanillite.bukkit.boot.Bootstrap"
 "#;
 
+/// The default of `[jvm]` key `jvm.<name>` from [`DEFAULT_CONFIG`].
+fn default_config(key: &str) -> &'static str {
+    let Some(name) = key.strip_prefix("jvm.") else {
+        return "";
+    };
+    DEFAULT_CONFIG
+        .lines()
+        .find_map(|line| {
+            let (k, v) = line.split_once(" = ")?;
+            (k == name).then(|| v.trim_matches('"'))
+        })
+        .unwrap_or("")
+}
+
 /// The host table, kept for logging.
 static HOST: AtomicUsize = AtomicUsize::new(0);
 
@@ -176,8 +190,10 @@ fn start(host: *const abi::HostApi, plugin: abi::PluginId) -> Result<(), String>
     HOST.store(host as usize, Ordering::Relaxed);
     // SAFETY: valid strings for the calls.
     unsafe { (api.config_load)(plugin, str(DEFAULT_CONFIG)) };
+    // A key missing from an existing config.toml takes its default.
     let config = |key: &str| {
-        read_string(|out| unsafe { (api.config_string)(plugin, str(key), out) }).unwrap_or_default()
+        read_string(|out| unsafe { (api.config_string)(plugin, str(key), out) })
+            .unwrap_or_else(|| default_config(key).to_owned())
     };
     let dir = PathBuf::from(
         read_string(|out| unsafe { (api.data_dir)(plugin, out) }).ok_or("no data directory")?,
