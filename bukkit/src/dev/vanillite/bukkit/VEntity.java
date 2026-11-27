@@ -321,6 +321,14 @@ public abstract class VEntity implements Entity {
     }
 
     @Override
+    public boolean isInWater() {
+        org.bukkit.block.Block b = getLocation().getBlock();
+        org.bukkit.Material type = b.getType();
+        return type == org.bukkit.Material.WATER || type == org.bukkit.Material.BUBBLE_COLUMN
+                || b.getBlockData().getAsString().contains("waterlogged=true");
+    }
+
+    @Override
     public float getFallDistance() {
         return (float) prop(Abi.entity_prop.FALL_DISTANCE, 0);
     }
