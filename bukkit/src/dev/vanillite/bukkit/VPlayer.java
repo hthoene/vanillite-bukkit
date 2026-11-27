@@ -658,6 +658,20 @@ public abstract class VPlayer extends CraftHumanEntity implements Player {
         }
     }
 
+    /** Bukkit's compass target; null: the world spawn. Kept by the layer, not sent to the client. */
+    private volatile org.bukkit.Location compassTarget;
+
+    @Override
+    public void setCompassTarget(org.bukkit.Location target) {
+        compassTarget = target == null ? null : target.clone();
+    }
+
+    @Override
+    public org.bukkit.Location getCompassTarget() {
+        org.bukkit.Location target = compassTarget;
+        return target != null ? target.clone() : getWorld().getSpawnLocation();
+    }
+
     @Override
     public boolean isSleepingIgnored() {
         return sleepingIgnored;
