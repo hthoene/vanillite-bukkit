@@ -156,15 +156,161 @@ public abstract class VWorld implements World {
 
     @Override
     public Collection<Entity> getNearbyEntities(Location location, double x, double y, double z) {
+        List<Entity> result = new ArrayList<>();
+        inBox(location.getX() - x, location.getY() - y, location.getZ() - z,
+                location.getX() + x, location.getY() + y, location.getZ() + z, result::add);
+        return result;
+    }
+
+    @Override
+    public Collection<Entity> getNearbyEntities(Location location, double x, double y, double z,
+            java.util.function.Predicate<? super Entity> filter) {
+        List<Entity> result = new ArrayList<>();
+        for (Entity e : getNearbyEntities(location, x, y, z)) {
+            if (filter == null || filter.test(e)) {
+                result.add(e);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public Collection<Entity> getNearbyEntities(org.bukkit.util.BoundingBox box) {
+        return getNearbyEntities(box, null);
+    }
+
+    @Override
+    public Collection<Entity> getNearbyEntities(org.bukkit.util.BoundingBox box,
+            java.util.function.Predicate<? super Entity> filter) {
+        List<Entity> result = new ArrayList<>();
+        inBox(box.getMinX(), box.getMinY(), box.getMinZ(), box.getMaxX(), box.getMaxY(), box.getMaxZ(), e -> {
+            if (filter == null || filter.test(e)) {
+                result.add(e);
+            }
+        });
+        return result;
+    }
+
+    @Override
+    public long getFullTime() {
+        var s = Native.scratch();
+        MemorySegment out = s.alloc(8);
+        Ctx.check(Host.world_time(Native.plugin, id, out), "World.getFullTime");
+        return out.get(JAVA_LONG, 0);
+    }
+
+    @Override
+    public long getTime() {
+        return Math.floorMod(getFullTime(), 24000L);
+    }
+
+    @Override
+    public void setFullTime(long time) {
+        Ctx.check(Host.world_set_time(Native.plugin, id, time), "World.setFullTime");
+    }
+
+    @Override
+    public void setTime(long time) {
+        long full = getFullTime();
+        setFullTime(full - Math.floorMod(full, 24000L) + time);
+    }
+
+    /** Half the side of the boxes {@link #getEntities} asks for (the host allows 2048 blocks a side). */
+    private static final double REACH = 1024;
+
+    /**
+     * All entities of the world. Entities exist only in loaded chunks, which lie around players
+     * (and the spawn): one box query per area around them, without duplicates.
+     */
+    @Override
+    public List<Entity> getEntities() {
+        List<double[]> centers = new ArrayList<>();
+        for (Player p : getPlayers()) {
+            Location at = p.getLocation();
+            centers.add(new double[] {at.getX(), at.getZ()});
+        }
+        Location spawn = getSpawnLocation();
+        centers.add(new double[] {spawn.getX(), spawn.getZ()});
+        List<double[]> asked = new ArrayList<>();
+        java.util.Map<UUID, Entity> found = new java.util.LinkedHashMap<>();
+        for (double[] c : centers) {
+            boolean covered = false;
+            for (double[] a : asked) {
+                if (Math.abs(a[0] - c[0]) <= REACH / 2 && Math.abs(a[1] - c[1]) <= REACH / 2) {
+                    covered = true;
+                    break;
+                }
+            }
+            if (covered) {
+                continue;
+            }
+            asked.add(c);
+            try {
+                inBox(c[0] - REACH, getMinHeight(), c[1] - REACH, c[0] + REACH, getMaxHeight(), c[1] + REACH,
+                        e -> found.putIfAbsent(e.getUniqueId(), e));
+            } catch (IllegalStateException e) {
+                // Another world's task owns it (e.g. /gc listing every world): its entities
+                // cannot be read from here, as Folia; the listing leaves them out.
+                return List.of();
+            }
+        }
+        return new ArrayList<>(found.values());
+    }
+
+    @Override
+    public List<org.bukkit.entity.LivingEntity> getLivingEntities() {
+        List<org.bukkit.entity.LivingEntity> out = new ArrayList<>();
+        for (Entity e : getEntities()) {
+            if (e instanceof org.bukkit.entity.LivingEntity l) {
+                out.add(l);
+            }
+        }
+        return out;
+    }
+
+    @Override
+    @SuppressWarnings({"unchecked", "deprecation"})
+    public <T extends Entity> Collection<T> getEntitiesByClass(Class<T>... classes) {
+        return (Collection<T>) getEntitiesByClasses(classes);
+    }
+
+    @Override
+    public <T extends Entity> Collection<T> getEntitiesByClass(Class<T> type) {
+        List<T> out = new ArrayList<>();
+        for (Entity e : getEntities()) {
+            if (type.isInstance(e)) {
+                out.add(type.cast(e));
+            }
+        }
+        return out;
+    }
+
+    @Override
+    public Collection<Entity> getEntitiesByClasses(Class<?>... classes) {
+        List<Entity> out = new ArrayList<>();
+        for (Entity e : getEntities()) {
+            for (Class<?> c : classes) {
+                if (c.isInstance(e)) {
+                    out.add(e);
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The entities whose bounding box meets a box (each side at most 2048 blocks). */
+    private void inBox(double x0, double y0, double z0, double x1, double y1, double z1,
+            java.util.function.Consumer<Entity> sink) {
         var s = Native.scratch();
         MemorySegment min = s.alloc(Abi.Vec3.SIZE);
-        min.set(JAVA_DOUBLE, Abi.Vec3.x, location.getX() - x);
-        min.set(JAVA_DOUBLE, Abi.Vec3.y, location.getY() - y);
-        min.set(JAVA_DOUBLE, Abi.Vec3.z, location.getZ() - z);
+        min.set(JAVA_DOUBLE, Abi.Vec3.x, x0);
+        min.set(JAVA_DOUBLE, Abi.Vec3.y, y0);
+        min.set(JAVA_DOUBLE, Abi.Vec3.z, z0);
         MemorySegment max = s.alloc(Abi.Vec3.SIZE);
-        max.set(JAVA_DOUBLE, Abi.Vec3.x, location.getX() + x);
-        max.set(JAVA_DOUBLE, Abi.Vec3.y, location.getY() + y);
-        max.set(JAVA_DOUBLE, Abi.Vec3.z, location.getZ() + z);
+        max.set(JAVA_DOUBLE, Abi.Vec3.x, x1);
+        max.set(JAVA_DOUBLE, Abi.Vec3.y, y1);
+        max.set(JAVA_DOUBLE, Abi.Vec3.z, z1);
         MemorySegment empty = s.str("");
         MemorySegment count = s.alloc(8);
         int cap = 64;
@@ -176,13 +322,12 @@ public abstract class VWorld implements World {
                 cap = (int) Math.min(n, 1 << 20);
                 continue;
             }
-            List<Entity> result = new ArrayList<>((int) n);
             for (long i = 0; i < n; i++) {
                 UUID uuid = Native.uuid(out.asSlice(i * Abi.EntityInfo.SIZE + Abi.EntityInfo.uuid, Abi.Uuid.SIZE));
                 VPlayer player = Layer.server.players.get(uuid);
-                result.add(player != null ? player : VEntity.create(this, uuid));
+                sink.accept(player != null ? player : VEntity.create(this, uuid));
             }
-            return result;
+            return;
         }
     }
 
