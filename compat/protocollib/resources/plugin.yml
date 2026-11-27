@@ -1,0 +1,8 @@
+name: ProtocolLib
+version: 5.4.0
+description: ProtocolLib's API on Vanillite's packet interface (Vanillite's own implementation).
+authors: [Vanillite]
+main: com.comphenix.protocol.ProtocolLib
+load: STARTUP
+api-version: "1.13"
+folia-supported: true

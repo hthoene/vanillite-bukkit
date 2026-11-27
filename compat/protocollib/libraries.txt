@@ -1,0 +1,2 @@
+# Compile-time only jars of this module; none: it implements ProtocolLib's API itself.
+# <url> <sha1>
