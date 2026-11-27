@@ -306,6 +306,9 @@ public final class Layer implements JvmPlugin {
             Class<? extends JavaPlugin> main = Class.forName(description.getMain(), true, loader).asSubclass(JavaPlugin.class);
             JavaPlugin plugin = main.getDeclaredConstructor().newInstance();
             server.pluginManager.plugins.put(description.getName(), plugin);
+            if (c.paper) {
+                server.pluginManager.paperPlugins.add(description.getName());
+            }
             plugins.add(plugin);
             if (!c.paper) {
                 server.commandMap.registerAll(description.getName(), commands(plugin, description));

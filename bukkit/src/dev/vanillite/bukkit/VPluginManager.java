@@ -3,8 +3,10 @@ package dev.vanillite.bukkit;
 
 import dev.vanillite.jvm.Native;
 import dev.vanillite.jvm.abi.Abi;
+import dev.vanillite.jvm.abi.Host;
 import io.papermc.paper.plugin.configuration.PluginMeta;
 import java.io.File;
+import java.lang.foreign.MemorySegment;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.HashSet;
@@ -31,6 +33,8 @@ import org.bukkit.plugin.RegisteredListener;
 import org.bukkit.plugin.SimplePluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import static java.lang.foreign.ValueLayout.JAVA_INT;
+
 /**
  * Plugins, event dispatch and Bukkit's permission registry, behind the server's
  * {@link SimplePluginManager} (which delegates to it as on Paper). Permission plugins replace the
@@ -41,6 +45,8 @@ public abstract class VPluginManager implements org.bukkit.plugin.PluginManager 
     static final java.lang.invoke.MethodHandle NEW = Impl.constructor(VPluginManager.class, SimplePluginManager.class);
 
     final Map<String, Plugin> plugins = new LinkedHashMap<>();
+    /** Names of the plugins loaded from a {@code paper-plugin.yml}. */
+    final Set<String> paperPlugins = new HashSet<>();
     /** The manager plugins see. */
     final SimplePluginManager spm;
 
@@ -145,6 +151,7 @@ public abstract class VPluginManager implements org.bukkit.plugin.PluginManager 
         } catch (Throwable t) {
             Native.log(Abi.log_level.ERROR, "Error enabling " + plugin.getName() + ": " + Native.trace(t));
         }
+        reportHosted();
     }
 
     @Override
@@ -169,6 +176,55 @@ public abstract class VPluginManager implements org.bukkit.plugin.PluginManager 
         HandlerList.unregisterAll(plugin);
         Layer.server.messenger.unregisterIncomingPluginChannel(plugin);
         Layer.server.messenger.unregisterOutgoingPluginChannel(plugin);
+        reportHosted();
+    }
+
+    /**
+     * Tells the server the plugins and their state for {@code /plugins}, {@code /version <plugin>}
+     * and Query, in the {@code Bukkit} or {@code Paper} group as on Paper. Servers older than ABI
+     * 1.11 do not list them.
+     */
+    synchronized void reportHosted() {
+        Plugin[] list = plugins.values().toArray(Plugin[]::new);
+        int count = Math.min(list.length, Abi.limits.MAX_HOSTED_PLUGINS);
+        Native.Scratch s = Native.scratch();
+        MemorySegment records = s.alloc(Math.max(1, count) * Abi.HostedPlugin.SIZE);
+        for (int i = 0; i < count; i++) {
+            Plugin p = list[i];
+            PluginMeta meta = p.getPluginMeta();
+            MemorySegment r = records.asSlice(i * Abi.HostedPlugin.SIZE, Abi.HostedPlugin.SIZE);
+            r.set(JAVA_INT, Abi.HostedPlugin.size, (int) Abi.HostedPlugin.SIZE);
+            r.set(JAVA_INT, Abi.HostedPlugin.enabled, p.isEnabled() ? 1 : 0);
+            String group = paperPlugins.contains(p.getName()) ? "Paper" : "Bukkit";
+            hostedStr(s, r, Abi.HostedPlugin.group, group, 256);
+            hostedStr(s, r, Abi.HostedPlugin.name, p.getName(), 256);
+            hostedStr(s, r, Abi.HostedPlugin.version, meta.getVersion(), 256);
+            hostedStr(s, r, Abi.HostedPlugin.description, meta.getDescription(), 4096);
+            hostedStr(s, r, Abi.HostedPlugin.authors, String.join(", ", meta.getAuthors()), 4096);
+            hostedStr(s, r, Abi.HostedPlugin.website, meta.getWebsite(), 256);
+        }
+        try {
+            int status = Host.set_hosted_plugins(Native.plugin, records, count, Abi.HostedPlugin.SIZE);
+            if (status != Abi.status.OK) {
+                Native.log(Abi.log_level.WARN, "The server refused the plugin list (status " + status + ")");
+            }
+        } catch (UnsupportedOperationException e) {
+            // The server predates ABI 1.11: /plugins lists only its own plugins.
+        }
+    }
+
+    /** Writes {@code text} (null as empty, cut to {@code max} UTF-8 bytes) as a Str field. */
+    private static void hostedStr(Native.Scratch s, MemorySegment record, long offset, String text, int max) {
+        String t = text == null ? "" : text;
+        byte[] bytes = t.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (bytes.length > max) {
+            int end = max;
+            while (end > 0 && (bytes[end] & 0xC0) == 0x80) {
+                end--;
+            }
+            t = new String(bytes, 0, end, java.nio.charset.StandardCharsets.UTF_8);
+        }
+        record.asSlice(offset, Abi.Str.SIZE).copyFrom(s.str(t));
     }
 
     @Override
@@ -184,6 +240,8 @@ public abstract class VPluginManager implements org.bukkit.plugin.PluginManager 
     public void clearPlugins() {
         disablePlugins();
         plugins.clear();
+        paperPlugins.clear();
+        reportHosted();
         HandlerList.unregisterAll();
         clearPermissions();
     }
