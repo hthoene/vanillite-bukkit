@@ -3,6 +3,7 @@ package dev.vanillite.jvm;
 
 import dev.vanillite.jvm.abi.Abi;
 import dev.vanillite.jvm.abi.Host;
+import java.io.ByteArrayOutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.foreign.Arena;
@@ -32,6 +33,13 @@ public final class Native {
     public static MemorySegment host = MemorySegment.NULL;
     /** This plugin's id. */
     public static int plugin;
+    /**
+     * The read epoch: advanced by every host call that may change a world or call back into
+     * plugins (all but the critical, read-only ones) and by every callback into the plugin.
+     * A value read from the host stays valid while the epoch is unchanged (one call into the
+     * plugin at a time).
+     */
+    public static long epoch;
     /** Address of a native function {@code int noop(int)} (measurements). */
     public static long noop;
     /** Address of {@code u64 upcall_loop(fn(int) -> int, u64 n)} (measurements). */
@@ -145,6 +153,38 @@ public final class Native {
             rec.set(JAVA_LONG, Abi.StrBuf.len, 0);
             return rec;
         }
+    }
+
+    // ----- Byte sinks: the host writes results of unknown size through a callback.
+
+    private static final ThreadLocal<ByteArrayOutputStream> SINK = ThreadLocal.withInitial(ByteArrayOutputStream::new);
+    private static volatile MemorySegment sinkWrite;
+
+    private static void sinkWrite(MemorySegment state, MemorySegment bytes) {
+        long len = bytes.get(JAVA_LONG, Abi.Bytes.len);
+        if (len > 0) {
+            SINK.get().write(bytes.get(ADDRESS, Abi.Bytes.ptr).reinterpret(len).toArray(JAVA_BYTE), 0, (int) len);
+        }
+    }
+
+    /** A {@code ByteSink} that collects into the calling thread's buffer ({@link #sunk}), emptied. */
+    public static MemorySegment sink(Scratch s) {
+        MemorySegment fn = sinkWrite;
+        if (fn == null) {
+            fn = upcall(Native.class, "sinkWrite", FunctionDescriptor.ofVoid(ADDRESS, Abi.Bytes.LAYOUT));
+            sinkWrite = fn;
+        }
+        SINK.get().reset();
+        MemorySegment rec = s.alloc(Abi.ByteSink.SIZE);
+        rec.set(JAVA_INT, Abi.ByteSink.size, (int) Abi.ByteSink.SIZE);
+        rec.set(ADDRESS, Abi.ByteSink.state, MemorySegment.NULL);
+        rec.set(ADDRESS, Abi.ByteSink.write, fn);
+        return rec;
+    }
+
+    /** What the host wrote into the calling thread's last {@link #sink}, as UTF-8 text. */
+    public static String sunk() {
+        return SINK.get().toString(StandardCharsets.UTF_8);
     }
 
     /** The calling thread's scratch memory, reset. */

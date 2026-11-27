@@ -75,6 +75,59 @@ public abstract class VWorld implements World {
     }
 
     @Override
+    public org.bukkit.Chunk getChunkAt(int x, int z) {
+        return VChunk.create(this, x, z);
+    }
+
+    @Override
+    public org.bukkit.Chunk getChunkAt(int x, int z, boolean generate) {
+        return VChunk.create(this, x, z);
+    }
+
+    @Override
+    public org.bukkit.Chunk getChunkAt(Block block) {
+        return VChunk.create(this, block.getX() >> 4, block.getZ() >> 4);
+    }
+
+    @Override
+    public boolean isChunkLoaded(int x, int z) {
+        return VChunk.state(this, x, z) != Abi.chunk_state.UNLOADED;
+    }
+
+    @Override
+    public boolean isChunkLoaded(org.bukkit.Chunk chunk) {
+        return chunk.getWorld() == this && isChunkLoaded(chunk.getX(), chunk.getZ());
+    }
+
+    @Override
+    public void getChunkAtAsync(int x, int z, boolean generate, boolean urgent,
+            java.util.function.Consumer<? super org.bukkit.Chunk> callback) {
+        // The server loads (and generates) the chunks a teleport needs itself; the handle is
+        // ready at once.
+        callback.accept(getChunkAt(x, z));
+    }
+
+    @Override
+    public org.bukkit.WorldBorder getWorldBorder() {
+        return VWorldBorder.create(this);
+    }
+
+    @Override
+    public int getMinHeight() {
+        return getEnvironment() == Environment.NORMAL ? -64 : 0;
+    }
+
+    @Override
+    public int getMaxHeight() {
+        return getEnvironment() == Environment.NORMAL ? 320 : 256;
+    }
+
+    @Override
+    public int getLogicalHeight() {
+        return getEnvironment() == Environment.NETHER ? 128 : getMaxHeight() - getMinHeight();
+    }
+
+    @Override
     public Block getBlockAt(int x, int y, int z) {
         return VBlock.create(this, x, y, z);
     }
@@ -98,33 +151,33 @@ public abstract class VWorld implements World {
     @Override
     public Collection<Entity> getNearbyEntities(Location location, double x, double y, double z) {
         var s = Native.scratch();
-        MemorySegment pos = s.alloc(Abi.Vec3.SIZE);
-        pos.set(JAVA_DOUBLE, Abi.Vec3.x, location.getX());
-        pos.set(JAVA_DOUBLE, Abi.Vec3.y, location.getY());
-        pos.set(JAVA_DOUBLE, Abi.Vec3.z, location.getZ());
-        int cap = 256;
-        MemorySegment out = s.alloc(Abi.Uuid.SIZE * cap);
+        MemorySegment min = s.alloc(Abi.Vec3.SIZE);
+        min.set(JAVA_DOUBLE, Abi.Vec3.x, location.getX() - x);
+        min.set(JAVA_DOUBLE, Abi.Vec3.y, location.getY() - y);
+        min.set(JAVA_DOUBLE, Abi.Vec3.z, location.getZ() - z);
+        MemorySegment max = s.alloc(Abi.Vec3.SIZE);
+        max.set(JAVA_DOUBLE, Abi.Vec3.x, location.getX() + x);
+        max.set(JAVA_DOUBLE, Abi.Vec3.y, location.getY() + y);
+        max.set(JAVA_DOUBLE, Abi.Vec3.z, location.getZ() + z);
+        MemorySegment empty = s.str("");
         MemorySegment count = s.alloc(8);
-        double radius = Math.sqrt(x * x + y * y + z * z);
-        Ctx.check(Host.entities_near(Ctx.current, id, pos, radius, s.str(""), out, cap, count), "getNearbyEntities");
-        long n = Math.min(count.get(JAVA_LONG, 0), cap);
-        List<Entity> result = new ArrayList<>((int) n);
-        MemorySegment loc = s.alloc(Abi.Location.SIZE);
-        for (long i = 0; i < n; i++) {
-            MemorySegment rec = out.asSlice(i * Abi.Uuid.SIZE, Abi.Uuid.SIZE);
-            UUID uuid = Native.uuid(rec);
-            if (Host.entity_location(Ctx.current, id, rec, loc) != Abi.status.OK) {
+        int cap = 64;
+        while (true) {
+            MemorySegment out = s.alloc(Abi.EntityInfo.SIZE * cap);
+            Ctx.check(Host.entities_in_box(Ctx.current, id, min, max, empty, out, cap, count), "getNearbyEntities");
+            long n = count.get(JAVA_LONG, 0);
+            if (n > cap) {
+                cap = (int) Math.min(n, 1 << 20);
                 continue;
             }
-            double dx = loc.get(JAVA_DOUBLE, Abi.Location.pos + Abi.Vec3.x) - location.getX();
-            double dy = loc.get(JAVA_DOUBLE, Abi.Location.pos + Abi.Vec3.y) - location.getY();
-            double dz = loc.get(JAVA_DOUBLE, Abi.Location.pos + Abi.Vec3.z) - location.getZ();
-            if (Math.abs(dx) <= x && Math.abs(dy) <= y && Math.abs(dz) <= z) {
+            List<Entity> result = new ArrayList<>((int) n);
+            for (long i = 0; i < n; i++) {
+                UUID uuid = Native.uuid(out.asSlice(i * Abi.EntityInfo.SIZE + Abi.EntityInfo.uuid, Abi.Uuid.SIZE));
                 VPlayer player = Layer.server.players.get(uuid);
                 result.add(player != null ? player : VEntity.create(this, uuid));
             }
+            return result;
         }
-        return result;
     }
 
     @Override

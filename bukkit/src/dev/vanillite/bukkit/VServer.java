@@ -145,6 +145,27 @@ public abstract class VServer implements Server {
     }
 
     @Override
+    public org.bukkit.scoreboard.ScoreboardManager getScoreboardManager() {
+        return VScoreboard.MANAGER;
+    }
+
+    @Override
+    public <T extends org.bukkit.Keyed> org.bukkit.Tag<T> getTag(String registry, org.bukkit.NamespacedKey tag, Class<T> clazz) {
+        return dev.vanillite.bukkit.registry.VTag.get(registry, tag, clazz);
+    }
+
+    @Override
+    public <T extends org.bukkit.Keyed> Iterable<org.bukkit.Tag<T>> getTags(String registry, Class<T> clazz) {
+        return dev.vanillite.bukkit.registry.VTag.all(registry, clazz);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public org.bukkit.UnsafeValues getUnsafe() {
+        return VUnsafe.INSTANCE;
+    }
+
+    @Override
     public Logger getLogger() {
         return logger;
     }
@@ -266,6 +287,9 @@ public abstract class VServer implements Server {
         return "update";
     }
 
+    /** Set when the server shuts the layer down. */
+    volatile boolean stopping;
+
     @Override
     public File getPluginsFolder() {
         return pluginsFolder;
@@ -273,7 +297,7 @@ public abstract class VServer implements Server {
 
     @Override
     public boolean isStopping() {
-        return false;
+        return stopping;
     }
 
     @Override
