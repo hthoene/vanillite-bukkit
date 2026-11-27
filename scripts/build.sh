@@ -16,6 +16,9 @@ for compat in compat/*/; do
     name="$(basename "$compat")"
     fetch_compat "$name"
     compile_java "$BUILD/classes/compat/$name" "$BUILD/classes/jvm:$BUILD/classes/bukkit:$CLASSPATH_LIBS:$CLASSPATH_COMPAT" "$compat/src"
+    if [[ -d "$compat/resources" ]]; then
+        cp -r "$compat/resources/." "$BUILD/classes/compat/$name/"
+    fi
 done
 compile_java "$BUILD/classes/hello" "$CLASSPATH_LIBS" examples/hello/src
 cp -r examples/hello/resources/. "$BUILD/classes/hello/"

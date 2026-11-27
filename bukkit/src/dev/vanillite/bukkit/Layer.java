@@ -135,6 +135,7 @@ public final class Layer implements JvmPlugin {
                 Native.log(Abi.log_level.ERROR, "Could not read " + jar.getFileName() + ": " + Native.trace(t));
             }
         }
+        bundled(found);
         for (Candidate c : order(found)) {
             try {
                 loadPlugin(c);
@@ -154,6 +155,34 @@ public final class Layer implements JvmPlugin {
         Events.subscribe(kinds);
         Native.log(Abi.log_level.INFO, "Loaded " + plugins.size() + " Bukkit plugin(s) in "
                 + (System.nanoTime() - start) / 1_000_000 + " ms; native events " + kinds);
+    }
+
+    /**
+     * Plugins the layer implements itself ({@code compat/<name>.jar} with a {@code plugin.yml}):
+     * ProtocolLib, whose real jar needs Minecraft's internals. Loaded when the real plugin is
+     * installed or another plugin depends on it; it then takes the real one's place.
+     */
+    private void bundled(Map<String, Candidate> found) {
+        Path jar = Path.of(System.getProperty("vanillite.jvm.dir"), "compat", "protocollib.jar");
+        if (!Files.isRegularFile(jar)) {
+            return;
+        }
+        boolean wanted = found.containsKey("ProtocolLib") || found.values().stream()
+                .anyMatch(c -> c.description.getDepend().contains("ProtocolLib")
+                        || c.description.getSoftDepend().contains("ProtocolLib"));
+        if (!wanted) {
+            return;
+        }
+        try {
+            Candidate own = describe(jar.toFile());
+            Candidate real = found.put("ProtocolLib", own);
+            if (real != null) {
+                Native.log(Abi.log_level.INFO, real.file.getName() + " is replaced by Vanillite's ProtocolLib "
+                        + own.description.getVersion() + " (on the server's packet interface)");
+            }
+        } catch (Throwable t) {
+            Native.log(Abi.log_level.ERROR, "Could not read " + jar + ": " + Native.trace(t));
+        }
     }
 
     /** Reads {@code paper-plugin.yml} or {@code plugin.yml} of a jar; null without either. */
@@ -314,7 +343,9 @@ public final class Layer implements JvmPlugin {
         File data = new File(c.file.getParentFile(), description.getName());
         var loader = new VPluginClassLoader(c.file, description, data, logger(description.getPrefix() != null
                 ? description.getPrefix() : description.getName()), Layer.class.getClassLoader(), libraries);
-        attachCompat(description.getName(), loader);
+        if (!c.file.getParentFile().getName().equals("compat")) {
+            attachCompat(description.getName(), loader);
+        }
         Thread thread = Thread.currentThread();
         ClassLoader previous = thread.getContextClassLoader();
         thread.setContextClassLoader(loader);
