@@ -639,6 +639,30 @@ public abstract class VPlayer extends CraftHumanEntity implements Player {
 
     // ----- Game state
 
+    /** {@code Abi.player_prop.SLEEPING_IGNORED} (ABI 1.12). */
+    private static final int SLEEPING_IGNORED = 17;
+    private volatile boolean sleepingIgnored;
+
+    @Override
+    public void setSleepingIgnored(boolean ignored) {
+        sleepingIgnored = ignored;
+        var s = Native.scratch();
+        int status = Host.player_set(Ctx.current, worldId(), s.uuid(uuid), SLEEPING_IGNORED, ignored ? 1 : 0);
+        if (status == Abi.status.WRONG_OWNER) {
+            Layer.server.scheduler.onWorld(worldId(), () -> {
+                if (isOnline() && sleepingIgnored == ignored) {
+                    var t = Native.scratch();
+                    Host.player_set(Ctx.current, worldId(), t.uuid(uuid), SLEEPING_IGNORED, ignored ? 1 : 0);
+                }
+            });
+        }
+    }
+
+    @Override
+    public boolean isSleepingIgnored() {
+        return sleepingIgnored;
+    }
+
     /**
      * The last value read per property. While the player's own action fires an event (breaking,
      * placing, using), the core lends the player out and its properties cannot be read; handlers

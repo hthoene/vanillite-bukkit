@@ -308,6 +308,18 @@ public abstract class VEntity implements Entity {
         return out.get(JAVA_DOUBLE, 0);
     }
 
+    @Override
+    public float getFallDistance() {
+        return (float) prop(Abi.entity_prop.FALL_DISTANCE, 0);
+    }
+
+    @Override
+    public void setFallDistance(float distance) {
+        var s = Native.scratch();
+        Ctx.check(Host.entity_set(Ctx.current, worldId(), s.uuid(uuid), Abi.entity_prop.FALL_DISTANCE,
+                Math.max(0, distance)), "Entity.setFallDistance");
+    }
+
     public boolean isTamed() {
         return getOwnerUniqueId() != null;
     }

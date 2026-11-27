@@ -22,40 +22,64 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /**
- * Bukkit commands on Vanillite. Every label of the command map gets a native command tree (a
- * literal with one greedy argument) for the console, command blocks and the client's command list
- * and tab completion; labels the server already has (Vanilla's commands) keep the native tree.
- * Players' commands go through {@code PlayerCommandPreprocessEvent} ({@link Events}), where a
- * Bukkit command takes precedence over a Vanilla one with the same label, as on Paper.
+ * Bukkit commands on Vanillite. Every label of the command map (aliases, {@code plugin:label}
+ * forms and WorldEdit's {@code /set}) gets a native command tree (a literal with one greedy
+ * argument) for the console, command blocks and the client's command list and tab completion,
+ * as Paper does; labels the server already has (Vanilla's commands) keep the native tree.
+ * Labels that appear later (commands registered in {@code onEnable}) are added after each plugin
+ * is enabled; the server then sends every player its tree again. A tree is shown to the players
+ * who may use the command ({@link Command#testPermissionSilent}, through the permission provider)
+ * while its plugin is enabled. Players' commands go through {@code PlayerCommandPreprocessEvent}
+ * ({@link Events}), where a Bukkit command takes precedence over a Vanilla one with the same
+ * label, as on Paper.
  */
 final class Commands {
     private Commands() {}
 
     /** Number of the layer's own diagnostics command. */
     static final int DIAG = 65_535;
+    /** Permission node prefix of the trees: the provider answers it for the label after it. */
+    private static final String NODE = "vanillite-bukkit.command:";
     private static final List<String> LABELS = new ArrayList<>();
+    private static final java.util.Set<String> KNOWN = new java.util.HashSet<>();
+    private static MemorySegment execute;
+    private static MemorySegment suggest;
+    /** False once the server refused a late tree (a server older than ABI 1.12). */
+    private static boolean late = true;
 
-    /** Registers native trees for the labels of the command map (at load). */
-    static void register() {
-        var execute = Native.upcall(Commands.class, "execute", Abi.Fn.CommandFn);
-        var suggest = Native.upcall(Commands.class, "suggest", Abi.Fn.SuggestFn);
+    /**
+     * Registers native trees for the labels of the command map that have none yet: at load and
+     * after a plugin was enabled. Returns whether trees were added.
+     */
+    static synchronized boolean register() {
+        if (execute == null) {
+            execute = Native.upcall(Commands.class, "execute", Abi.Fn.CommandFn);
+            suggest = Native.upcall(Commands.class, "suggest", Abi.Fn.SuggestFn);
+        }
+        if (!late) {
+            return false;
+        }
         Map<String, Integer> trees = new java.util.LinkedHashMap<>();
         for (String label : Layer.server.commandMap.getKnownCommands().keySet()) {
-            if (label.indexOf(':') < 0 && label.matches("[a-z0-9_.-]+")) {
+            if (LABELS.size() < DIAG - 1 && label.length() <= 64 && !label.isEmpty()
+                    && label.chars().noneMatch(Character::isWhitespace) && KNOWN.add(label)) {
                 LABELS.add(label);
                 trees.put(label, LABELS.size());
             }
         }
-        trees.put("vjvm", DIAG);
-        int skipped = 0;
+        if (KNOWN.add("vjvm")) {
+            trees.put("vjvm", DIAG);
+        }
+        int added = 0;
         try (Arena arena = Arena.ofConfined()) {
             for (var tree : trees.entrySet()) {
                 int number = tree.getValue();
                 int level = number == DIAG ? 4 : 0;
+                String permission = number == DIAG ? "" : NODE + tree.getKey();
                 long stride = Abi.CommandNode.SIZE;
                 MemorySegment nodes = arena.allocate(stride * 2, 8);
-                node(arena, nodes, -1, Abi.node.LITERAL, tree.getKey(), number, level, 0);
-                node(arena, nodes.asSlice(stride), 0, Abi.node.ARGUMENT, "args", number, level, number);
+                node(arena, nodes, -1, Abi.node.LITERAL, tree.getKey(), number, level, 0, permission);
+                node(arena, nodes.asSlice(stride), 0, Abi.node.ARGUMENT, "args", number, level, number, "");
                 MemorySegment spec = arena.allocate(Abi.CommandSpec.LAYOUT);
                 spec.set(JAVA_INT, Abi.CommandSpec.size, (int) Abi.CommandSpec.SIZE);
                 spec.set(ADDRESS, Abi.CommandSpec.nodes, nodes);
@@ -64,19 +88,29 @@ final class Commands {
                 spec.set(ADDRESS, Abi.CommandSpec.execute, execute);
                 spec.set(ADDRESS, Abi.CommandSpec.suggest, suggest);
                 spec.set(ADDRESS, Abi.CommandSpec.user, MemorySegment.NULL);
-                if (Host.register_command(Native.plugin, spec) != Abi.status.OK) {
-                    skipped++;
+                int status = Host.register_command(Native.plugin, spec);
+                if (status == Abi.status.WRONG_PHASE) {
+                    late = false;
+                    Native.log(Abi.log_level.WARN, "The server takes no commands after the start (ABI < 1.12): "
+                            + "commands registered in onEnable work but are not in the players' command list");
+                    break;
+                } else if (status == Abi.status.OK) {
+                    added++;
                 }
             }
         }
-        if (skipped > 0) {
-            Native.log(Abi.log_level.INFO, skipped + " Bukkit command label(s) are also server commands: players get the "
-                    + "plugin's command, the console the server's");
+        return added > 0;
+    }
+
+    /** Sends every online player its command tree again (a plugin was enabled or disabled). */
+    static void updateAll() {
+        for (org.bukkit.entity.Player p : Layer.server.getOnlinePlayers()) {
+            p.updateCommands();
         }
     }
 
     private static void node(Arena arena, MemorySegment n, int parent, int kind, String name, int executes, int level,
-            int suggests) {
+            int suggests, String permission) {
         n.fill((byte) 0);
         n.set(JAVA_INT, Abi.CommandNode.parent, parent);
         n.set(JAVA_INT, Abi.CommandNode.kind, kind);
@@ -88,6 +122,11 @@ final class Commands {
         n.set(JAVA_INT, Abi.CommandNode.level, level);
         n.set(JAVA_INT, Abi.CommandNode.executes, executes);
         n.set(JAVA_INT, Abi.CommandNode.suggests, suggests);
+        if (!permission.isEmpty()) {
+            byte[] node = permission.getBytes(StandardCharsets.UTF_8);
+            n.set(ADDRESS, Abi.CommandNode.permission + Abi.Str.ptr, arena.allocateFrom(JAVA_BYTE, node));
+            n.set(JAVA_LONG, Abi.CommandNode.permission + Abi.Str.len, node.length);
+        }
     }
 
     private static CommandSender sender(MemorySegment rec, long offset) {
@@ -163,7 +202,7 @@ final class Commands {
             String remaining = Events.str(req, Abi.SuggestRequest.remaining);
             CommandSender who = sender(req, Abi.SuggestRequest.sender);
             String line = LABELS.get(number - 1) + " " + remaining;
-            List<String> found = Layer.server.commandMap.tabComplete(who, line);
+            List<String> found = complete(who, line);
             if (found == null || found.isEmpty()) {
                 return Abi.status.OK;
             }
@@ -192,6 +231,27 @@ final class Commands {
         return Abi.status.OK;
     }
 
+    /**
+     * Tab completion as on Paper: {@code AsyncTabCompleteEvent} first (a handler that sets it
+     * handled answers), else the command's completer and {@code TabCompleteEvent}.
+     */
+    private static List<String> complete(CommandSender who, String line) {
+        org.bukkit.Location at = who instanceof org.bukkit.entity.Entity e ? e.getLocation() : null;
+        var async = new com.destroystokyo.paper.event.server.AsyncTabCompleteEvent(who, "/" + line, true, at);
+        Layer.server.pluginManager.callEvent(async);
+        if (async.isCancelled()) {
+            return List.of();
+        }
+        if (async.isHandled()) {
+            return async.getCompletions();
+        }
+        List<String> found = Layer.server.commandMap.tabComplete(who, line);
+        var event = new org.bukkit.event.server.TabCompleteEvent(who, "/" + line,
+                found == null ? new ArrayList<>() : new ArrayList<>(found), true, at);
+        Layer.server.pluginManager.callEvent(event);
+        return event.isCancelled() ? List.of() : event.getCompletions();
+    }
+
     /** The native permission provider: Bukkit's permissibles (with permission plugins) decide set nodes. */
     static void providePermissions() {
         var fn = Native.upcall(Commands.class, "permission", Abi.Fn.PermissionFn);
@@ -208,7 +268,9 @@ final class Commands {
             VPlayer p = Layer.server.players.get(Native.uuid(uuid));
             if (p != null) {
                 String name = Native.string(node).toLowerCase(Locale.ROOT);
-                if (p.isPermissionSet(name)) {
+                if (name.startsWith(NODE)) {
+                    answer = mayUse(p, name.substring(NODE.length())) ? Abi.permission.ALLOW : Abi.permission.DENY;
+                } else if (p.isPermissionSet(name)) {
                     answer = p.hasPermission(name) ? Abi.permission.ALLOW : Abi.permission.DENY;
                 }
             }
@@ -217,6 +279,15 @@ final class Commands {
         }
         out.reinterpret(4).set(JAVA_INT, 0, answer);
         return Abi.status.OK;
+    }
+
+    /** Paper's {@code canUse} of a Bukkit command tree: known, its plugin enabled, permitted. */
+    private static boolean mayUse(VPlayer p, String label) {
+        Command c = Layer.server.commandMap.getCommand(label);
+        if (c == null || c instanceof org.bukkit.command.PluginIdentifiableCommand pc && !pc.getPlugin().isEnabled()) {
+            return false;
+        }
+        return c.testPermissionSilent(p);
     }
 
     /** The command a label names, if Bukkit has one. */

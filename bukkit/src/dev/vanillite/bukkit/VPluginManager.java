@@ -152,6 +152,9 @@ public abstract class VPluginManager implements org.bukkit.plugin.PluginManager 
             Native.log(Abi.log_level.ERROR, "Error enabling " + plugin.getName() + ": " + Native.trace(t));
         }
         reportHosted();
+        if (!Commands.register()) {
+            Commands.updateAll();
+        }
     }
 
     @Override
@@ -177,6 +180,7 @@ public abstract class VPluginManager implements org.bukkit.plugin.PluginManager 
         Layer.server.messenger.unregisterIncomingPluginChannel(plugin);
         Layer.server.messenger.unregisterOutgoingPluginChannel(plugin);
         reportHosted();
+        Commands.updateAll();
     }
 
     /**
