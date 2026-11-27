@@ -1,0 +1,20 @@
+vanillite-bukkit
+Copyright 2026 Hannes Thöne and the Vanillite contributors
+
+This repository contains two parts under different licences:
+
+- vanillite-jvm/ (the native JVM host plugin, the Java bindings of Vanillite's plugin ABI and
+  their generator, and scripts/): Apache License 2.0, see vanillite-jvm/LICENSE.
+- Everything else, in particular bukkit/ (the implementation of the Bukkit/Paper API on
+  Vanillite) and examples/: GNU General Public License version 3, see LICENSE.
+
+The implementation is written from the public API (signatures and documentation) and from
+Vanilla's observable behaviour. It contains no code of CraftBukkit, Spigot, Paper or Folia.
+Class and member names that plugins refer to are used as names only.
+
+Not part of this repository and never distributed with it: the Paper API jar and its
+libraries (downloaded from their Maven repositories when the layer starts for the first time,
+checked by SHA-1; see bukkit/resources/libraries.txt) and any Minecraft server jar.
+
+Uses at build or run time: vanillite-abi (Apache-2.0), libloading (ISC), jni-sys (MIT or
+Apache-2.0).

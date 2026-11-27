@@ -1,0 +1,10 @@
+# The package description Vanillite reads before it loads the library.
+id = "bukkit"
+name = "Bukkit layer"
+version = "0.1.0"
+# Plugin API (ABI) version the library needs.
+api = "1.5"
+# Base name of the library: libvanillite_jvm.so
+library = "vanillite_jvm"
+# Bukkit plugins expect one main thread: every call into the layer is serialized.
+threading = "serialized"

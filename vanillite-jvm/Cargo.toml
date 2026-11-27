@@ -1,0 +1,22 @@
+[package]
+name = "vanillite-jvm"
+description = "Hosts a Java virtual machine inside Vanillite as an ordinary native plugin, with generated Java bindings for the plugin ABI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+publish = false
+default-run = "vanillite-jvm-bindgen"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "vanillite-jvm-bindgen"
+path = "src/bin/bindgen.rs"
+
+[dependencies]
+vanillite-abi = { git = "https://github.com/hthoene/vanillite", branch = "dev" }
+libloading = "0.8"
+jni-sys = "0.4"
