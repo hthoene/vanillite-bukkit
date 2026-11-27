@@ -39,7 +39,8 @@ jobs:
       - run: cargo build --release --locked -p vanillite-jvm --lib
       # The build records its target; the host refuses a library of another target.
       - shell: bash
-        run: test "$(rustc -vV | sed -n 's/^host: //p')" = "${{ matrix.target }}"
+        run: |
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
         with:
           name: library-${{ matrix.target }}
