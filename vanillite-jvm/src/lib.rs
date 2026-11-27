@@ -85,7 +85,8 @@ extern "C" fn upcall_loop(f: extern "C" fn(i32) -> i32, n: u64) -> u64 {
 /// Defaults of `plugins/<id>/config.toml`.
 const DEFAULT_CONFIG: &str = r#"# vanillite-jvm: the Java virtual machine inside Vanillite.
 [jvm]
-# Java home of a Java 25 runtime; empty: $JAVA_HOME, then `java` on the PATH.
+# Java home of a Java 25 runtime; empty: the runtime in runtime/ (Vanillite's
+# plugins.bukkit.auto-setup unpacks one there), then $JAVA_HOME, then `java` on the PATH.
 java-home = ""
 # Jars on the JVM's class path, relative to this directory (separated by ':'; `dir/**` adds
 # every jar below `dir`). For an AOT cache (-XX:AOTCache) put everything here, e.g.
@@ -151,10 +152,27 @@ fn read_string(call: impl Fn(*mut abi::StrBuf) -> Status) -> Option<String> {
     }
 }
 
-/// Finds the Java home: the configured one, `$JAVA_HOME`, or the one of `java` on the `PATH`.
-fn java_home(configured: &str) -> Option<PathBuf> {
+/// Finds the Java home: the configured one, the runtime unpacked in `<dir>/runtime/` (itself
+/// or one directory below), `$JAVA_HOME`, or the one of `java` on the `PATH`.
+fn java_home(configured: &str, dir: &Path) -> Option<PathBuf> {
     if !configured.is_empty() {
         return Some(PathBuf::from(configured));
+    }
+    let runtime = dir.join("runtime");
+    let has_jvm = |home: &Path| {
+        home.join("lib/server")
+            .join(libloading::library_filename("jvm"))
+            .is_file()
+    };
+    if has_jvm(&runtime) {
+        return Some(runtime);
+    }
+    if let Some(home) = std::fs::read_dir(&runtime).ok().and_then(|entries| {
+        let mut homes: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        homes.sort();
+        homes.into_iter().find(|home| has_jvm(home))
+    }) {
+        return Some(home);
     }
     if let Some(home) = std::env::var_os("JAVA_HOME").filter(|h| !h.is_empty()) {
         return Some(PathBuf::from(home));
@@ -198,8 +216,9 @@ fn start(host: *const abi::HostApi, plugin: abi::PluginId) -> Result<(), String>
     let dir = PathBuf::from(
         read_string(|out| unsafe { (api.data_dir)(plugin, out) }).ok_or("no data directory")?,
     );
-    let home = java_home(&config("jvm.java-home"))
-        .ok_or("no Java runtime found: set jvm.java-home in config.toml or JAVA_HOME")?;
+    let home = java_home(&config("jvm.java-home"), &dir).ok_or(
+        "no Java runtime found: set jvm.java-home in config.toml or JAVA_HOME, or unpack a Java 25 runtime into runtime/",
+    )?;
     let libjvm = home
         .join("lib/server")
         .join(libloading::library_filename("jvm"));

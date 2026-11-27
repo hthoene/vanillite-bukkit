@@ -51,7 +51,25 @@ Every other API method throws an `UnsupportedOperationException` that names it.
 - Only native events that some plugin listens to are subscribed (the plugin jars are scanned for
   `@EventHandler` methods before they are loaded): without a listener there is no upcall.
 
-## Build and install
+## Install
+
+Nothing to do by hand: put the Paper/Spigot plugin jars into the server's `plugins/` and start
+Vanillite. It downloads the release of this layer made for its version into `plugins/bukkit/`
+and, without a Java 25 runtime, Eclipse Temurin into `plugins/bukkit/runtime/` (both checked by
+SHA-256), then loads the plugins (`plugins.bukkit.auto-setup`; see Vanillite's
+`docs/plugins.md`). The layer looks for Java in `jvm.java-home` of `plugins/bukkit/config.toml`,
+then `plugins/bukkit/runtime/`, `JAVA_HOME` and `java` on the `PATH`.
+
+## Release
+
+A tag `v<version>` (the version of `package/plugin.toml` and `Cargo.toml`) runs
+`.github/workflows/release.yml`: `scripts/package.sh` builds
+`vanillite-bukkit-<version>-<target>.tar.gz` (the folder `bukkit/`) for `x86_64-` and
+`aarch64-unknown-linux-gnu` on Ubuntu 22.04 (glibc 2.35), and the release gets the archives and
+`SHA256SUMS`. Vanillite pins a release by those lines in
+`crates/vanillite-server/bukkit-layer.txt`. A manual run of the workflow is a dry run.
+
+## Build from source
 
 Needs Rust (stable) and a JDK 25.
 
