@@ -159,18 +159,18 @@ fn java_home(configured: &str, dir: &Path) -> Option<PathBuf> {
         return Some(PathBuf::from(configured));
     }
     let runtime = dir.join("runtime");
-    let has_jvm = |home: &Path| {
-        home.join("lib/server")
-            .join(libloading::library_filename("jvm"))
-            .is_file()
-    };
+    let has_jvm = |home: &Path| libjvm(home).is_file();
     if has_jvm(&runtime) {
         return Some(runtime);
     }
     if let Some(home) = std::fs::read_dir(&runtime).ok().and_then(|entries| {
         let mut homes: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
         homes.sort();
-        homes.into_iter().find(|home| has_jvm(home))
+        // macOS runtimes unpack as <name>/Contents/Home.
+        homes
+            .into_iter()
+            .flat_map(|home| [home.join("Contents/Home"), home])
+            .find(|home| has_jvm(home))
     }) {
         return Some(home);
     }
@@ -179,10 +179,34 @@ fn java_home(configured: &str, dir: &Path) -> Option<PathBuf> {
     }
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
-        .map(|dir| dir.join("java"))
+        .map(|dir| dir.join(format!("java{}", std::env::consts::EXE_SUFFIX)))
         .find(|java| java.is_file())
         .and_then(|java| std::fs::canonicalize(java).ok())
         .and_then(|java| java.parent()?.parent().map(Path::to_path_buf))
+}
+
+/// The `libjvm` of a Java home (`bin/server/jvm.dll` on Windows).
+fn libjvm(home: &Path) -> PathBuf {
+    let dir = if cfg!(windows) { "bin" } else { "lib" };
+    home.join(dir)
+        .join("server")
+        .join(libloading::library_filename("jvm"))
+}
+
+/// Opens `libjvm`. On Windows its own directory is searched for the libraries it needs (the
+/// Visual C++ runtime the Java runtime ships in `bin/`).
+unsafe fn open_libjvm(path: &Path) -> Result<libloading::Library, libloading::Error> {
+    #[cfg(windows)]
+    {
+        use libloading::os::windows::{LOAD_WITH_ALTERED_SEARCH_PATH, Library};
+        // SAFETY: as for the caller.
+        unsafe { Library::load_with_flags(path, LOAD_WITH_ALTERED_SEARCH_PATH) }.map(Into::into)
+    }
+    #[cfg(not(windows))]
+    // SAFETY: as for the caller.
+    unsafe {
+        libloading::Library::new(path)
+    }
 }
 
 /// `libjvm`, loaded once and never unloaded (a JVM cannot be started twice in one process).
@@ -219,14 +243,12 @@ fn start(host: *const abi::HostApi, plugin: abi::PluginId) -> Result<(), String>
     let home = java_home(&config("jvm.java-home"), &dir).ok_or(
         "no Java runtime found: set jvm.java-home in config.toml or JAVA_HOME, or unpack a Java 25 runtime into runtime/",
     )?;
-    let libjvm = home
-        .join("lib/server")
-        .join(libloading::library_filename("jvm"));
+    let libjvm = libjvm(&home);
     let lib = match LIBJVM.get() {
         Some(_) => return Err("a JVM was already started in this process".to_owned()),
         None => {
             // SAFETY: libjvm's initialisers are safe to run.
-            let lib = unsafe { libloading::Library::new(&libjvm) }
+            let lib = unsafe { open_libjvm(&libjvm) }
                 .map_err(|e| format!("cannot load {}: {e}", libjvm.display()))?;
             LIBJVM.get_or_init(|| lib)
         }
@@ -249,7 +271,7 @@ fn start(host: *const abi::HostApi, plugin: abi::PluginId) -> Result<(), String>
         .iter()
         .map(|p| p.to_string_lossy())
         .collect::<Vec<_>>()
-        .join(":");
+        .join(if cfg!(windows) { ";" } else { ":" });
     let mut options = vec![
         format!("-Djava.class.path={class_path}"),
         "-Xrs".to_owned(),

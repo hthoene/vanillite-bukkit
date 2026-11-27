@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the layer. Output in build/dist/plugins/: bukkit/ (the Vanillite plugin package:
-# plugin.toml, libvanillite_jvm.so, vanillite-jvm.jar, vanillite-bukkit.jar) and the example
+# plugin.toml, the library (libvanillite_jvm.so/.dylib, vanillite_jvm.dll), vanillite-jvm.jar, vanillite-bukkit.jar) and the example
 # plugins HelloBukkit.jar and VBench.jar. Copy the contents into a server's plugins/ directory.
 # SPDX-License-Identifier: Apache-2.0
 source "$(dirname "$0")/env.sh"
@@ -29,7 +29,12 @@ DIST="$BUILD/dist/plugins"
 rm -rf "$BUILD/dist"
 mkdir -p "$DIST/bukkit"
 cp package/plugin.toml "$DIST/bukkit/"
-cp target/release/libvanillite_jvm.so "$DIST/bukkit/"
+case "$(uname -s)" in
+    Darwin) LIBRARY=libvanillite_jvm.dylib ;;
+    MINGW* | MSYS* | CYGWIN*) LIBRARY=vanillite_jvm.dll ;;
+    *) LIBRARY=libvanillite_jvm.so ;;
+esac
+cp "target/release/$LIBRARY" "$DIST/bukkit/"
 "$JAR" --create --file "$DIST/bukkit/vanillite-jvm.jar" -C "$BUILD/classes/jvm" .
 "$JAR" --create --file "$DIST/bukkit/vanillite-bukkit.jar" -C "$BUILD/classes/bukkit" .
 mkdir -p "$DIST/bukkit/compat"

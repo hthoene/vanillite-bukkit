@@ -36,7 +36,7 @@ Every other API method throws an `UnsupportedOperationException` that names it.
 
 ## How it works
 
-- `libvanillite_jvm.so` is loaded by Vanillite like any native plugin (`threading = "serialized"`:
+- `libvanillite_jvm.so` (`.dylib` on macOS, `vanillite_jvm.dll` on Windows) is loaded by Vanillite like any native plugin (`threading = "serialized"`:
   one call into the layer at a time, the stand-in for Bukkit's main thread). On `load` it opens
   `libjvm` of a Java 25 runtime (`jvm.java-home` in `plugins/bukkit/config.toml`, `JAVA_HOME`,
   or `java` on the `PATH`) and starts the JVM with `-Xrs` (signals stay with the server).
@@ -63,11 +63,12 @@ then `plugins/bukkit/runtime/`, `JAVA_HOME` and `java` on the `PATH`.
 ## Release
 
 A tag `v<version>` (the version of `package/plugin.toml` and `Cargo.toml`) runs
-`.github/workflows/release.yml`: `scripts/package.sh` builds
-`vanillite-bukkit-<version>-<target>.tar.gz` (the folder `bukkit/`) for `x86_64-` and
-`aarch64-unknown-linux-gnu` on Ubuntu 22.04 (glibc 2.35), and the release gets the archives and
-`SHA256SUMS`. Vanillite pins a release by those lines in
-`crates/vanillite-server/bukkit-layer.txt`. A manual run of the workflow is a dry run.
+`.github/workflows/release.yml`: the library is built for each target on its own runner
+(`x86_64-` and `aarch64-unknown-linux-gnu` on Ubuntu 22.04 (glibc 2.35), `x86_64-pc-windows-msvc`
+with the C runtime linked in, `aarch64-` and `x86_64-apple-darwin`), the Java parts once, and
+`scripts/package.sh <target> <library>` packs `vanillite-bukkit-<version>-<target>.tar.gz` (the
+folder `bukkit/`) per target; the release gets the archives and `SHA256SUMS`. Vanillite pins a
+release by those lines in `crates/vanillite-server/bukkit-layer.txt`. A manual run of the workflow is a dry run.
 
 ## Build from source
 
