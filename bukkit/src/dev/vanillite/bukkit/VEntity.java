@@ -21,8 +21,8 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 public abstract class VEntity implements Entity {
     private static final MethodHandle NEW = Impl.constructor(VEntity.class, VWorld.class, UUID.class);
 
-    VWorld world;
-    final UUID uuid;
+    protected VWorld world;
+    protected final UUID uuid;
 
     protected VEntity(VWorld world, UUID uuid) {
         this.world = world;
@@ -37,7 +37,7 @@ public abstract class VEntity implements Entity {
         }
     }
 
-    int worldId() {
+    protected int worldId() {
         return world.id;
     }
 

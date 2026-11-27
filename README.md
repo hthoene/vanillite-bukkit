@@ -7,11 +7,17 @@ plugin: when it is installed, it starts a Java virtual machine inside the server
 runs Bukkit/Paper plugins on top of Vanillite's plugin API. Without it nothing of this exists
 in the server: no JVM, no memory, no work.
 
-**Status: stage 1 (spike).** Only a small part of the API is implemented: plugin loading from
-`plugins/*.jar` (`plugin.yml`), `PlayerJoinEvent`, `PlayerQuitEvent`, `BlockBreakEvent`, block
-type get/set, players (`sendMessage`, permissions, location), entities (location, type, nearby
-entities), the scheduler and plugin commands. Every other API method throws an
-`UnsupportedOperationException` that names it.
+**Status: stage 2 (in progress).** Plugins load from `plugins/*.jar` (`plugin.yml` or
+`paper-plugin.yml`) in dependency order (`depend`, `softdepend`, `loadbefore`, `STARTUP` first)
+with shared class lookup between plugins and `libraries:` resolved from Maven Central. The plugin
+manager is Bukkit's `SimplePluginManager` with Bukkit's permission registry (plugin.yml
+permissions, `PermissionAttachment`, defaults), so permission plugins such as LuckPerms inject
+as on Paper; the layer is also the server's permission provider. Commands use Bukkit's
+`SimpleCommandMap` with tab completion; a player's Bukkit command takes precedence over a Vanilla
+one of the same name. Events: pre-login/login, join, quit, chat (`AsyncPlayerChatEvent`,
+`AsyncChatEvent`), command preprocess, teleport, respawn, block break; Bukkit priorities
+interleave with native plugins. Services, plugin messaging and offline players are there.
+Every other API method throws an `UnsupportedOperationException` that names it.
 
 ## Layout
 

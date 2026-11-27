@@ -45,6 +45,16 @@ public abstract class VWorld implements World {
         return id;
     }
 
+    /** The dimension key, e.g. {@code minecraft:overworld}. */
+    public String dimensionKey() {
+        return key;
+    }
+
+    @Override
+    public Location getSpawnLocation() {
+        return new Location(this, 0.5, 64, 0.5);
+    }
+
     @Override
     public String getName() {
         return name;

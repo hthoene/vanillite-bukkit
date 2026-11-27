@@ -23,12 +23,16 @@ public final class SelfTest {
 
     public static void main(String[] args) throws Throwable {
         for (Class<?> c : new Class<?>[] {VServer.class, VWorld.class, VBlock.class, VEntity.class, VPlayer.class,
-                VConsole.class, VPluginManager.class, VScheduler.class, VBridge.class}) {
+                VConsole.class, VPluginManager.class, VScheduler.class, VBridge.class, VOfflinePlayer.class, VProfile.class,
+                org.bukkit.craftbukkit.CraftServer.class}) {
             Class<?> impl = Impl.of(c);
             check(c.isAssignableFrom(impl) && !java.lang.reflect.Modifier.isAbstract(impl.getModifiers()),
                     "generated " + impl.getName());
         }
-        Layer.server = Impl.create(VServer.class);
+        Layer.server = Impl.create(org.bukkit.craftbukkit.CraftServer.class);
+        org.bukkit.Bukkit.setServer(Layer.server);
+        Layer.server.init(new File("."));
+        check(Layer.server.getPluginManager() instanceof org.bukkit.plugin.SimplePluginManager, "plugin manager is a SimplePluginManager");
         World world = (VWorld) VWorld.NEW.invokeExact(0, "minecraft:overworld");
         check(world.getName().equals("world") && world.getEnvironment() == World.Environment.NORMAL, "world name");
         Block block = world.getBlockAt(1, 2, 3);
@@ -36,13 +40,18 @@ public final class SelfTest {
         Player player = VPlayer.create((VWorld) world, UUID.randomUUID(), "Alex");
         check(player.getName().equals("Alex"), "player name");
         try {
-            player.getHealth();
+            player.getExhaustion();
             check(false, "unimplemented method throws");
         } catch (UnsupportedOperationException e) {
-            check(e.getMessage().contains("getHealth") && e.getMessage().contains("not implemented"),
+            check(e.getMessage().contains("getExhaustion") && e.getMessage().contains("not implemented"),
                     "unimplemented method throws: " + e.getMessage());
         }
         check(Layer.server.getPluginCommand("none") == null, "no commands");
+        org.bukkit.permissions.Permission node = new org.bukkit.permissions.Permission("test.node",
+                org.bukkit.permissions.PermissionDefault.TRUE);
+        Layer.server.getPluginManager().addPermission(node);
+        check(Layer.server.getPluginManager().getPermission("TEST.node") == node
+                && Layer.server.getPluginManager().getDefaultPermissions(false).contains(node), "permission registry");
         if (args.length > 0) {
             for (String name : new String[] {"HelloBukkit.jar", "VBench.jar"}) {
                 try (JarFile jar = new JarFile(new File(args[0], name)); InputStream in = jar.getInputStream(jar.getJarEntry("plugin.yml"))) {
