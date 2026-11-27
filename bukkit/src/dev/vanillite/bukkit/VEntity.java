@@ -48,6 +48,79 @@ public abstract class VEntity implements Entity {
         }
     }
 
+    private static final java.util.Map<EntityType, MethodHandle> TYPED = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Its type when known without asking the server (an entity that is not in its world yet). */
+    private EntityType knownType;
+
+    /**
+     * An entity whose type is known: an instance of the type's API interface (a zombie is a
+     * {@code Zombie}), so plugins' {@code instanceof} checks work; what the layer does not
+     * implement of that interface throws.
+     */
+    static Entity create(VWorld world, UUID uuid, EntityType type) {
+        if (type == null || type == EntityType.UNKNOWN || type == EntityType.PLAYER || type.getEntityClass() == null
+                || !type.getEntityClass().isInterface()) {
+            return create(world, uuid);
+        }
+        MethodHandle h = TYPED.computeIfAbsent(type, t -> {
+            try {
+                Class<? extends VEntity> c = Impl.of(VEntity.class, t.getEntityClass());
+                return java.lang.invoke.MethodHandles.privateLookupIn(c, java.lang.invoke.MethodHandles.lookup())
+                        .findConstructor(c, java.lang.invoke.MethodType.methodType(void.class, VWorld.class, UUID.class))
+                        .asType(java.lang.invoke.MethodType.methodType(VEntity.class, VWorld.class, UUID.class));
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        try {
+            VEntity e = (VEntity) h.invokeExact(world, uuid);
+            e.knownType = type;
+            return e;
+        } catch (Throwable t) {
+            throw Native.rethrow(t);
+        }
+    }
+
+    /** An entity about to be added at a place: reads before it exists answer from here. */
+    static Entity pending(VWorld world, UUID uuid, EntityType type, Location at) {
+        VEntity e = (VEntity) create(world, uuid, type);
+        e.knownType = type;
+        e.lastWorld = at.getWorld();
+        e.lastX = at.getX();
+        e.lastY = at.getY();
+        e.lastZ = at.getZ();
+        e.lastYaw = at.getYaw();
+        e.lastPitch = at.getPitch();
+        return e;
+    }
+
+    /** Remembers where the entity is (from an event): reads the server cannot answer use it. */
+    public void cacheLocation(Location at) {
+        if (at == null || at.getWorld() == null) {
+            return;
+        }
+        lastWorld = at.getWorld();
+        lastX = at.getX();
+        lastY = at.getY();
+        lastZ = at.getZ();
+        lastYaw = at.getYaw();
+        lastPitch = at.getPitch();
+    }
+
+    /** The API type of an entity type key such as {@code minecraft:zombie}. */
+    static EntityType typeOf(String key) {
+        NamespacedKey k = NamespacedKey.fromString(key);
+        if (k == null) {
+            return EntityType.UNKNOWN;
+        }
+        for (EntityType t : EntityType.values()) {
+            if (t != EntityType.UNKNOWN && k.getKey().equals(t.name().toLowerCase(java.util.Locale.ROOT))) {
+                return t;
+            }
+        }
+        return EntityType.UNKNOWN;
+    }
+
     protected int worldId() {
         return world.id;
     }
@@ -164,6 +237,9 @@ public abstract class VEntity implements Entity {
 
     @Override
     public EntityType getType() {
+        if (knownType != null) {
+            return knownType;
+        }
         int w0 = worldId();
         var s = Native.scratch();
         MemorySegment buf = s.strBuf(128);
@@ -204,7 +280,77 @@ public abstract class VEntity implements Entity {
         return true;
     }
 
-    @Override
+    // ----- What the API interfaces of entity kinds ask often (Tameable, Projectile, Ageable,
+    // Damageable). Plain public methods: a generated entity class whose interface declares them
+    // uses these instead of throwing.
+
+    private java.util.Map<String, Object> data() {
+        if (Layer.server.players.containsKey(uuid)) {
+            return java.util.Map.of();
+        }
+        String snbt = NativeAccess.entityData(this);
+        return Snbt.compound(snbt);
+    }
+
+    private static UUID uuidOf(Object o) {
+        if (o instanceof int[] a && a.length == 4) {
+            return new UUID((long) a[0] << 32 | (a[1] & 0xffffffffL), (long) a[2] << 32 | (a[3] & 0xffffffffL));
+        }
+        return null;
+    }
+
+    private double prop(int prop, double fallback) {
+        var s = Native.scratch();
+        MemorySegment out = s.alloc(8);
+        if (Host.entity_get(Ctx.current, worldId(), s.uuid(uuid), prop, out) != Abi.status.OK) {
+            return fallback;
+        }
+        return out.get(JAVA_DOUBLE, 0);
+    }
+
+    public boolean isTamed() {
+        return getOwnerUniqueId() != null;
+    }
+
+    public UUID getOwnerUniqueId() {
+        return uuidOf(data().get("Owner"));
+    }
+
+    public org.bukkit.entity.AnimalTamer getOwner() {
+        UUID owner = getOwnerUniqueId();
+        if (owner == null) {
+            return null;
+        }
+        VPlayer p = Layer.server.players.get(owner);
+        return p != null ? p : org.bukkit.Bukkit.getOfflinePlayer(owner);
+    }
+
+    public org.bukkit.projectiles.ProjectileSource getShooter() {
+        UUID owner = uuidOf(data().get("Owner"));
+        if (owner == null) {
+            return null;
+        }
+        Entity e = WorldEvents.entity(world, owner, null);
+        return e instanceof org.bukkit.projectiles.ProjectileSource ps ? ps : null;
+    }
+
+    public double getHealth() {
+        return prop(Abi.entity_prop.HEALTH, 0);
+    }
+
+    public int getAge() {
+        return (int) prop(Abi.entity_prop.AGE, 0);
+    }
+
+    public boolean isAdult() {
+        return getAge() >= 0;
+    }
+
+    public boolean isDead() {
+        return !isValid();
+    }
+
+        @Override
     public boolean equals(Object o) {
         return o instanceof VEntity e && e.uuid.equals(uuid);
     }

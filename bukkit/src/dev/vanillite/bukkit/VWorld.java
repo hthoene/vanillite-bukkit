@@ -75,6 +75,12 @@ public abstract class VWorld implements World {
     }
 
     @Override
+    public org.bukkit.Chunk[] getLoadedChunks() {
+        // The server does not list its loaded chunks to plugins; callers ask per chunk.
+        return new org.bukkit.Chunk[0];
+    }
+
+    @Override
     public org.bukkit.Chunk getChunkAt(int x, int z) {
         return VChunk.create(this, x, z);
     }

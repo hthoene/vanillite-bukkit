@@ -58,7 +58,7 @@ final class Events {
     private Events() {}
 
     /** Bukkit event class (internal name) → native kind. */
-    static final Map<String, Integer> KINDS = Map.ofEntries(
+    static final Map<String, Integer> KINDS = WorldEvents.withKinds(
             Map.entry("org/bukkit/event/player/PlayerJoinEvent", Abi.event.PLAYER_JOIN),
             Map.entry("org/bukkit/event/player/PlayerQuitEvent", Abi.event.PLAYER_LEAVE),
             Map.entry("org/bukkit/event/block/BlockBreakEvent", Abi.event.BLOCK_BREAK),
@@ -69,6 +69,12 @@ final class Events {
             Map.entry("org/bukkit/event/player/PlayerCommandPreprocessEvent", Abi.event.PLAYER_COMMAND),
             Map.entry("org/bukkit/event/player/PlayerTeleportEvent", Abi.event.PLAYER_TELEPORT),
             Map.entry("org/bukkit/event/player/PlayerRespawnEvent", Abi.event.PLAYER_RESPAWN));
+
+    /** True while Bukkit listeners of a menu event run: menu changes they make wait for the next tick. */
+    static boolean inMenuEvent;
+
+    /** How many native events are being dispatched right now (nested events count each). */
+    static int depth;
 
     /** Kinds subscribed at load. */
     static final TreeSet<Integer> subscribed = new TreeSet<>();
@@ -82,7 +88,10 @@ final class Events {
         if (kind != null && !subscribed.contains(kind) && warned.add(type)) {
             Native.log(Abi.log_level.WARN, type.getSimpleName() + " listeners registered at run time get no events: "
                     + "the event was not found in any plugin jar at load");
-        } else if (kind == null && warned.add(type) && !type.getName().startsWith("org.bukkit.event.server")) {
+        } else if (kind == null && warned.add(type) && !type.getName().startsWith("org.bukkit.event.server")
+                && type != org.bukkit.event.world.WorldInitEvent.class && type != org.bukkit.event.world.WorldLoadEvent.class
+                && (type.getName().startsWith("org.bukkit.") || type.getName().startsWith("io.papermc.")
+                        || type.getName().startsWith("com.destroystokyo."))) {
             Native.log(Abi.log_level.INFO, "Event " + type.getName() + " is not delivered by Vanillite yet");
         }
     }
@@ -110,7 +119,7 @@ final class Events {
     }
 
     /** The Bukkit side of one native event, alive from its first to its last stage. */
-    private abstract static class State {
+    abstract static class State {
         final MemorySegment header;
 
         State(MemorySegment header) {
@@ -140,6 +149,7 @@ final class Events {
         Native.epoch++;
         EventPriority priority = PRIORITIES[(int) user.address()];
         long key = header.address();
+        depth++;
         try {
             State state = STATES.get(key);
             if (state == null) {
@@ -161,6 +171,7 @@ final class Events {
             STATES.remove(key);
             Native.log(Abi.log_level.ERROR, "Event dispatch failed: " + Native.trace(t));
         } finally {
+            depth--;
             Ctx.current = previous;
             Native.epoch++;
         }
@@ -178,7 +189,7 @@ final class Events {
             case Abi.event.BLOCK_BREAK -> BreakBlock.of(header.reinterpret(Abi.BlockEvent.SIZE));
             case Abi.event.PLAYER_TELEPORT -> Teleport.of(header.reinterpret(Abi.GameEvent.SIZE));
             case Abi.event.PLAYER_RESPAWN -> Respawn.of(header.reinterpret(Abi.PlayerWorldEvent.SIZE));
-            default -> null;
+            default -> WorldEvents.create(kind, header);
         };
     }
 
@@ -248,7 +259,7 @@ final class Events {
         rec.set(JAVA_FLOAT, offset + Abi.Location.pitch, l.getPitch());
     }
 
-    private static boolean listens(Class<? extends Event> type) {
+    static boolean listens(Class<? extends Event> type) {
         return VPluginManager.handlers(type).getRegisteredListeners().length > 0;
     }
 
@@ -324,6 +335,11 @@ final class Events {
             UUID id = uuid(e, Abi.PlayerEvent.player);
             VWorld world = Layer.server.world(e.get(JAVA_INT, Abi.PlayerEvent.world));
             VPlayer player = Layer.server.joined(id, str(e, Abi.PlayerEvent.name), world);
+            try {
+                player.getLocation();
+            } catch (RuntimeException ex) {
+                // not readable here; the first move tells it
+            }
             message = fromJson(str(e, Abi.PlayerEvent.message));
             event = new PlayerJoinEvent(player, message);
         }
@@ -563,6 +579,13 @@ final class Events {
             PlayerTeleportEvent.TeleportCause pending = player.takeTeleportCause();
             event = new PlayerTeleportEvent(player, from, to.clone(), pending != null ? pending : cause);
             event.setCancelled(cancelled());
+        }
+
+        @Override
+        void done() {
+            if (!cancelled()) {
+                ((VPlayer) event.getPlayer()).cacheLocation(to);
+            }
         }
 
         static Teleport of(MemorySegment e) {

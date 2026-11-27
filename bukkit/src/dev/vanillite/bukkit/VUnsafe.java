@@ -75,4 +75,15 @@ public abstract class VUnsafe implements UnsafeValues {
     public String getMainLevelName() {
         return "world";
     }
+
+    @Override
+    public org.bukkit.inventory.ItemStack deserializeStack(java.util.Map<String, Object> args) {
+        StringBuilder b = new StringBuilder("{id:").append(Snbt.quote(String.valueOf(args.get("id"))))
+                .append(",count:").append(args.get("count") instanceof Number n ? n.intValue() : 1);
+        if (args.get("components") instanceof String c && !c.isBlank()) {
+            b.append(",components:").append(c);
+        }
+        return VItemStack.fromSnbt(b.append('}').toString());
+    }
+
 }

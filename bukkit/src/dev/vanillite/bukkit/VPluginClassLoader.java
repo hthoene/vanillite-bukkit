@@ -43,6 +43,11 @@ public final class VPluginClassLoader extends URLClassLoader implements Configur
         ALL.add(this);
     }
 
+    /** Adds the layer's adapter jar for this plugin to its class path. */
+    void addCompat(URL jar) {
+        addURL(jar);
+    }
+
     @Override
     public PluginMeta getConfiguration() {
         return description;

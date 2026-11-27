@@ -55,6 +55,16 @@ public abstract class VItemType implements ItemType.Typed<ItemMeta> {
     }
 
     @Override
+    public org.bukkit.inventory.ItemStack createItemStack() {
+        return createItemStack(1);
+    }
+
+    @Override
+    public org.bukkit.inventory.ItemStack createItemStack(int amount) {
+        return dev.vanillite.bukkit.VItemStack.of(asMaterial(), amount);
+    }
+
+    @Override
     public NamespacedKey getKey() {
         return key;
     }

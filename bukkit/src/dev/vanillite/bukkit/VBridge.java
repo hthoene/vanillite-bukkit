@@ -72,6 +72,22 @@ public abstract class VBridge implements InternalAPIBridge {
     }
 
     @Override
+    public org.bukkit.inventory.ItemStack deserializeItem(byte[] data) {
+        return VItemStack.fromSnbt(new String(data, java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Override
+    public org.bukkit.block.Biome constructLegacyCustomBiome() {
+        return dev.vanillite.bukkit.registry.KeyedStandIn.create(org.bukkit.block.Biome.class,
+                org.bukkit.NamespacedKey.minecraft("custom"), "biome");
+    }
+
+    @Override
+    public org.bukkit.inventory.ItemStack createEmptyStack() {
+        return VItemStack.empty();
+    }
+
+    @Override
     public ComponentFlattener componentFlattener() {
         return ComponentFlattener.basic();
     }

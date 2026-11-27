@@ -12,6 +12,11 @@ fetch_libraries
 compile_java "$BUILD/classes/jvm" "" vanillite-jvm/java/src
 compile_java "$BUILD/classes/bukkit" "$BUILD/classes/jvm:$CLASSPATH_LIBS" bukkit/src
 cp -r bukkit/resources/. "$BUILD/classes/bukkit/"
+for compat in compat/*/; do
+    name="$(basename "$compat")"
+    fetch_compat "$name"
+    compile_java "$BUILD/classes/compat/$name" "$BUILD/classes/jvm:$BUILD/classes/bukkit:$CLASSPATH_LIBS:$CLASSPATH_COMPAT" "$compat/src"
+done
 compile_java "$BUILD/classes/hello" "$CLASSPATH_LIBS" examples/hello/src
 cp -r examples/hello/resources/. "$BUILD/classes/hello/"
 compile_java "$BUILD/classes/bench" "$CLASSPATH_LIBS" examples/bench/src
@@ -24,6 +29,10 @@ cp package/plugin.toml "$DIST/bukkit/"
 cp target/release/libvanillite_jvm.so "$DIST/bukkit/"
 "$JAR" --create --file "$DIST/bukkit/vanillite-jvm.jar" -C "$BUILD/classes/jvm" .
 "$JAR" --create --file "$DIST/bukkit/vanillite-bukkit.jar" -C "$BUILD/classes/bukkit" .
+mkdir -p "$DIST/bukkit/compat"
+for compat in "$BUILD"/classes/compat/*/; do
+    "$JAR" --create --file "$DIST/bukkit/compat/$(basename "$compat").jar" -C "$compat" .
+done
 "$JAR" --create --file "$DIST/HelloBukkit.jar" -C "$BUILD/classes/hello" .
 "$JAR" --create --file "$DIST/VBench.jar" -C "$BUILD/classes/bench" .
 echo "built $DIST"

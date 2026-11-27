@@ -51,6 +51,8 @@ public abstract class VServer implements Server {
     final VConsole console = Impl.create(VConsole.class);
     final SimpleServicesManager services = new SimpleServicesManager();
     final StandardMessenger messenger = new StandardMessenger();
+    final VHelpMap helpMap = new VHelpMap();
+    final VItemFactory itemFactory = Impl.create(VItemFactory.class);
     private final Logger logger = Layer.logger("Vanillite");
     private final Properties properties = new Properties();
     File pluginsFolder;
@@ -188,6 +190,88 @@ public abstract class VServer implements Server {
     @Override
     public Messenger getMessenger() {
         return messenger;
+    }
+
+    @Override
+    public org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner,
+            org.bukkit.event.inventory.InventoryType type) {
+        return createInventory(owner, type, type.defaultTitle());
+    }
+
+    @Override
+    public org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner,
+            org.bukkit.event.inventory.InventoryType type, Component title) {
+        int size = type == org.bukkit.event.inventory.InventoryType.CHEST ? 27 : type.getDefaultSize();
+        return VCustomInventory.create(type, size, owner, title);
+    }
+
+    @Override
+    public org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner,
+            org.bukkit.event.inventory.InventoryType type, String title) {
+        return createInventory(owner, type, Texts.legacy(title));
+    }
+
+    @Override
+    public org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner, int size) {
+        return createInventory(owner, size, org.bukkit.event.inventory.InventoryType.CHEST.defaultTitle());
+    }
+
+    @Override
+    public org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner, int size, Component title) {
+        if (size < 9 || size > 54 || size % 9 != 0) {
+            throw new IllegalArgumentException("Chests must have a size that is a multiple of 9 between 9 and 54 slots (got " + size + ")");
+        }
+        return VCustomInventory.create(org.bukkit.event.inventory.InventoryType.CHEST, size, owner, title);
+    }
+
+    @Override
+    public org.bukkit.inventory.Inventory createInventory(org.bukkit.inventory.InventoryHolder owner, int size, String title) {
+        return createInventory(owner, size, Texts.legacy(title));
+    }
+
+    @Override
+    public org.bukkit.block.data.BlockData createBlockData(org.bukkit.Material material) {
+        return VBlockData.of(Materials.state(material));
+    }
+
+    @Override
+    public org.bukkit.block.data.BlockData createBlockData(org.bukkit.Material material,
+            java.util.function.Consumer<? super org.bukkit.block.data.BlockData> consumer) {
+        var data = createBlockData(material);
+        if (consumer != null) {
+            consumer.accept(data);
+        }
+        return data;
+    }
+
+    @Override
+    public org.bukkit.block.data.BlockData createBlockData(String data) {
+        return VBlockData.parse(data);
+    }
+
+    @Override
+    public org.bukkit.block.data.BlockData createBlockData(org.bukkit.Material material, String data) {
+        String key = material == null ? "" : material.getKey().toString();
+        return VBlockData.parse(data == null || data.isEmpty() ? key : data.startsWith("[") ? key + data : data);
+    }
+
+    @Override
+    public org.bukkit.inventory.ItemFactory getItemFactory() {
+        return itemFactory;
+    }
+
+    @Override
+    public int getSpawnRadius() {
+        try {
+            return Integer.parseInt(property("spawn-protection", "16"));
+        } catch (NumberFormatException e) {
+            return 16;
+        }
+    }
+
+    @Override
+    public org.bukkit.help.HelpMap getHelpMap() {
+        return helpMap;
     }
 
     @Override

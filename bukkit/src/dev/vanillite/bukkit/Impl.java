@@ -29,12 +29,30 @@ public final class Impl {
     private Impl() {}
 
     private static final Map<Class<?>, Class<?>> GENERATED = new ConcurrentHashMap<>();
+    private static final Map<java.util.List<Class<?>>, Class<?>> GENERATED_WITH = new ConcurrentHashMap<>();
     private static final ClassDesc UOE = ClassDesc.of("java.lang.UnsupportedOperationException");
 
     /** The generated concrete subclass of {@code base}. */
     @SuppressWarnings("unchecked")
     public static <T> Class<? extends T> of(Class<T> base) {
-        return (Class<? extends T>) GENERATED.computeIfAbsent(base, Impl::generate);
+        return (Class<? extends T>) GENERATED.computeIfAbsent(base, b -> generate(b, java.util.List.of()));
+    }
+
+    /**
+     * The generated concrete subclass of {@code base} that also implements the API interfaces
+     * {@code extra} (their methods that {@code base} does not have throw), e.g. an item meta of a
+     * kind the layer implements only in part.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> Class<? extends T> of(Class<T> base, Class<?>... extra) {
+        if (extra.length == 0) {
+            return of(base);
+        }
+        java.util.List<Class<?>> key = new java.util.ArrayList<>();
+        key.add(base);
+        key.addAll(java.util.List.of(extra));
+        return (Class<? extends T>) GENERATED_WITH.computeIfAbsent(java.util.List.copyOf(key),
+                k -> generate(base, k.subList(1, k.size())));
     }
 
     /** A constructor of the generated subclass of {@code base} with the given parameter types. */
@@ -62,7 +80,7 @@ public final class Impl {
         return m.getName() + MethodType.methodType(m.getReturnType(), m.getParameterTypes()).toMethodDescriptorString();
     }
 
-    private static Class<?> generate(Class<?> base) {
+    private static Class<?> generate(Class<?> base, java.util.List<Class<?>> extra) {
         Set<String> concrete = new HashSet<>();
         Map<String, Method> missing = new LinkedHashMap<>();
         Deque<Class<?>> interfaces = new ArrayDeque<>();
@@ -74,6 +92,7 @@ public final class Impl {
             }
             interfaces.addAll(java.util.List.of(c.getInterfaces()));
         }
+        interfaces.addAll(extra);
         Set<Class<?>> seen = new HashSet<>();
         java.util.List<Method> abstracts = new java.util.ArrayList<>();
         for (Class<?> c = base; c != null; c = c.getSuperclass()) {
@@ -107,12 +126,19 @@ public final class Impl {
                 missing.putIfAbsent(k, m);
             }
         }
-        ClassDesc self = ClassDesc.of(base.getName() + "$Impl");
+        StringBuilder name = new StringBuilder(base.getName()).append("$Impl");
+        for (Class<?> i : extra) {
+            name.append('$').append(i.getSimpleName());
+        }
+        ClassDesc self = ClassDesc.of(name.toString());
         ClassDesc parent = ClassDesc.of(base.getName());
         String api = apiName(base);
         byte[] bytes = ClassFile.of().build(self, cb -> {
             cb.withFlags(ClassFile.ACC_PUBLIC | ClassFile.ACC_FINAL | ClassFile.ACC_SUPER | ClassFile.ACC_SYNTHETIC);
             cb.withSuperclass(parent);
+            if (!extra.isEmpty()) {
+                cb.withInterfaceSymbols(extra.stream().map(i -> ClassDesc.of(i.getName())).toList());
+            }
             for (Constructor<?> c : base.getDeclaredConstructors()) {
                 if (Modifier.isPrivate(c.getModifiers())) {
                     continue;
