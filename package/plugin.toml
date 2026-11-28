@@ -1,7 +1,7 @@
 # The package description Vanillite reads before it loads the library.
 id = "bukkit"
 name = "Bukkit layer"
-version = "0.1.1"
+version = "0.1.2"
 # Plugin API (ABI) version the library needs.
 api = "1.10"
 # Base name of the library: libvanillite_jvm.so

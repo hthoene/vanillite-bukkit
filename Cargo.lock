@@ -79,7 +79,7 @@ source = "git+https://github.com/hthoene/vanillite?branch=dev#6efb57b6accaa9e150
 
 [[package]]
 name = "vanillite-jvm"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "jni-sys",
  "libloading",

@@ -20,9 +20,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.sql.Driver;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.ServiceLoader;
 
 /**
  * Starts the layer: makes sure the Paper API and its libraries are present (downloaded from
@@ -55,6 +57,9 @@ public final class Bootstrap implements JvmPlugin {
             loader = new URLClassLoader("vanillite-bukkit", urls.toArray(URL[]::new), ClassLoader.getSystemClassLoader());
         }
         Thread.currentThread().setContextClassLoader(loader);
+        // JDBC drivers (as on Paper's class path) register with DriverManager when loaded; it
+        // would only look for them in the system class loader by itself.
+        ServiceLoader.load(Driver.class, loader).stream().forEach(ServiceLoader.Provider::get);
         layer = (JvmPlugin) Class.forName("dev.vanillite.bukkit.Layer", true, loader).getConstructor().newInstance();
         Native.log(Abi.log_level.INFO, "Bukkit layer classes ready in " + (System.nanoTime() - start) / 1_000_000 + " ms");
         layer.load();

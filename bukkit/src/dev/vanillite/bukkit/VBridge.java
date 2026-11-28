@@ -32,6 +32,12 @@ public abstract class VBridge implements InternalAPIBridge {
     }
 
     @Override
+    public <M, L> org.bukkit.GameRule<L> legacyGameRuleBridge(org.bukkit.GameRule<M> rule,
+            java.util.function.Function<L, M> fromLegacy, java.util.function.Function<M, L> toLegacy, Class<L> legacyClass) {
+        return LegacyGameRule.create(rule, fromLegacy, toLegacy, legacyClass);
+    }
+
+    @Override
     public DamageSource.Builder createDamageSourceBuilder(DamageType type) {
         return new DamageSource.Builder() {
             private Entity causing;

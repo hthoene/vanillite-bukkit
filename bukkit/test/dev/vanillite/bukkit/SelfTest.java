@@ -42,10 +42,10 @@ public final class SelfTest {
         Player player = VPlayer.create((VWorld) world, UUID.randomUUID(), "Alex");
         check(player.getName().equals("Alex"), "player name");
         try {
-            player.getExhaustion();
+            player.getAttackCooldown();
             check(false, "unimplemented method throws");
         } catch (UnsupportedOperationException e) {
-            check(e.getMessage().contains("getExhaustion") && e.getMessage().contains("not implemented"),
+            check(e.getMessage().contains("getAttackCooldown") && e.getMessage().contains("not implemented"),
                     "unimplemented method throws: " + e.getMessage());
         }
         check(Layer.server.getPluginCommand("none") == null, "no commands");

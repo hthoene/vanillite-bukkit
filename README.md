@@ -44,7 +44,8 @@ Every other API method throws an `UnsupportedOperationException` that names it.
   host's function table; the server calls Java through upcall stubs. No JNI glue per function.
 - The Paper API jar and its libraries are downloaded from Paper's and Maven Central's
   repositories at first start into `plugins/bukkit/libraries/` and checked by SHA-1. They are
-  never shipped with the layer.
+  never shipped with the layer. As on Paper, plugins also find the SQLite and MySQL JDBC drivers
+  and Commons Lang 2 there (e.g. for WorldGuard's profile cache).
 - API objects (`World`, `Block`, `Player`, `Entity`) are thin wrappers around ids; no world state
   is copied into the Java heap. Each implementation class is an abstract class that implements
   what is supported; at run time a final subclass is generated whose remaining methods throw.

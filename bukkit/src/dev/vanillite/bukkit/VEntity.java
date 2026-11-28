@@ -382,6 +382,656 @@ public abstract class VEntity implements Entity {
         return !isValid();
     }
 
+    // ----- Properties the server reports per entity (entity_prop)
+
+    /**
+     * Changes a property. One the server keeps no state for on this kind of entity (e.g. the
+     * glowing tag of a mob) is left as it is instead of failing the plugin.
+     */
+    private void setProp(int prop, double value, String what) {
+        var s = Native.scratch();
+        int status = Host.entity_set(Ctx.current, worldId(), s.uuid(uuid), prop, value);
+        if (status != Abi.status.UNSUPPORTED) {
+            Ctx.check(status, what);
+        }
+    }
+
+    @Override
+    public double getX() {
+        return getLocation().getX();
+    }
+
+    @Override
+    public double getY() {
+        return getLocation().getY();
+    }
+
+    @Override
+    public double getZ() {
+        return getLocation().getZ();
+    }
+
+    @Override
+    public float getYaw() {
+        return getLocation().getYaw();
+    }
+
+    @Override
+    public float getPitch() {
+        return getLocation().getPitch();
+    }
+
+    @Override
+    public org.bukkit.block.BlockFace getFacing() {
+        // Vanilla's Direction.fromYRot.
+        return switch (Math.floorMod((int) Math.floor(getYaw() / 90.0 + 0.5), 4)) {
+            case 0 -> org.bukkit.block.BlockFace.SOUTH;
+            case 1 -> org.bukkit.block.BlockFace.WEST;
+            case 2 -> org.bukkit.block.BlockFace.NORTH;
+            default -> org.bukkit.block.BlockFace.EAST;
+        };
+    }
+
+    @Override
+    public org.bukkit.entity.Pose getPose() {
+        return isSneaking() ? org.bukkit.entity.Pose.SNEAKING : org.bukkit.entity.Pose.STANDING;
+    }
+
+    @Override
+    public boolean isOnGround() {
+        return prop(Abi.entity_prop.ON_GROUND, 0) != 0;
+    }
+
+    @Override
+    public boolean isSneaking() {
+        return prop(Abi.entity_prop.SNEAKING, 0) != 0;
+    }
+
+    public boolean isSprinting() {
+        return prop(Abi.entity_prop.SPRINTING, 0) != 0;
+    }
+
+    @Override
+    public int getFireTicks() {
+        return (int) prop(Abi.entity_prop.FIRE_TICKS, 0);
+    }
+
+    @Override
+    public void setFireTicks(int ticks) {
+        setProp(Abi.entity_prop.FIRE_TICKS, ticks, "Entity.setFireTicks");
+    }
+
+    @Override
+    public int getMaxFireTicks() {
+        // Vanilla's getFireImmuneTicks: 20 for players, 1 for every other entity.
+        return this instanceof org.bukkit.entity.Player ? 20 : 1;
+    }
+
+    @Override
+    public int getFreezeTicks() {
+        return (int) prop(Abi.entity_prop.FREEZE_TICKS, 0);
+    }
+
+    @Override
+    public void setFreezeTicks(int ticks) {
+        if (ticks < 0) {
+            throw new IllegalArgumentException("Freeze ticks cannot be less than 0");
+        }
+        setProp(Abi.entity_prop.FREEZE_TICKS, ticks, "Entity.setFreezeTicks");
+    }
+
+    @Override
+    public int getMaxFreezeTicks() {
+        return 140;
+    }
+
+    @Override
+    public boolean isFrozen() {
+        return getFreezeTicks() >= getMaxFreezeTicks();
+    }
+
+    @Override
+    public boolean hasGravity() {
+        return prop(Abi.entity_prop.NO_GRAVITY, 0) == 0;
+    }
+
+    @Override
+    public void setGravity(boolean gravity) {
+        setProp(Abi.entity_prop.NO_GRAVITY, gravity ? 0 : 1, "Entity.setGravity");
+    }
+
+    @Override
+    public boolean isSilent() {
+        return prop(Abi.entity_prop.SILENT, 0) != 0;
+    }
+
+    @Override
+    public void setSilent(boolean silent) {
+        setProp(Abi.entity_prop.SILENT, silent ? 1 : 0, "Entity.setSilent");
+    }
+
+    @Override
+    public boolean isGlowing() {
+        return prop(Abi.entity_prop.GLOWING, 0) != 0;
+    }
+
+    @Override
+    public void setGlowing(boolean glowing) {
+        setProp(Abi.entity_prop.GLOWING, glowing ? 1 : 0, "Entity.setGlowing");
+    }
+
+    @Override
+    public void setInvulnerable(boolean invulnerable) {
+        setProp(Abi.entity_prop.INVULNERABLE, invulnerable ? 1 : 0, "Entity.setInvulnerable");
+    }
+
+    @Override
+    public boolean isPersistent() {
+        return prop(Abi.entity_prop.PERSISTENT, 0) != 0;
+    }
+
+    @Override
+    public void setPersistent(boolean persistent) {
+        setProp(Abi.entity_prop.PERSISTENT, persistent ? 1 : 0, "Entity.setPersistent");
+    }
+
+    @Override
+    public boolean isCustomNameVisible() {
+        return prop(Abi.entity_prop.CUSTOM_NAME_VISIBLE, 0) != 0;
+    }
+
+    @Override
+    public void setCustomNameVisible(boolean flag) {
+        setProp(Abi.entity_prop.CUSTOM_NAME_VISIBLE, flag ? 1 : 0, "Entity.setCustomNameVisible");
+    }
+
+    @Override
+    public boolean isInvisible() {
+        return prop(Abi.entity_prop.INVISIBLE, 0) != 0;
+    }
+
+    @Override
+    public void setInvisible(boolean invisible) {
+        setProp(Abi.entity_prop.INVISIBLE, invisible ? 1 : 0, "Entity.setInvisible");
+    }
+
+    @Override
+    public int getTicksLived() {
+        return (int) prop(Abi.entity_prop.TICKS_LIVED, 0);
+    }
+
+    @Override
+    public void setTicksLived(int value) {
+        if (value <= 0) {
+            throw new IllegalArgumentException("Age value (" + value + ") must be positive");
+        }
+        setProp(Abi.entity_prop.TICKS_LIVED, value, "Entity.setTicksLived");
+    }
+
+    @Override
+    public int getPortalCooldown() {
+        return (int) prop(Abi.entity_prop.PORTAL_COOLDOWN, 0);
+    }
+
+    @Override
+    public void setPortalCooldown(int cooldown) {
+        if (cooldown < 0) {
+            throw new IllegalArgumentException("Portal cooldown must not be negative");
+        }
+        setProp(Abi.entity_prop.PORTAL_COOLDOWN, cooldown, "Entity.setPortalCooldown");
+    }
+
+    @Override
+    public boolean isInLava() {
+        return getLocation().getBlock().getType() == org.bukkit.Material.LAVA;
+    }
+
+    @Override
+    public boolean isInWorld() {
+        return true;
+    }
+
+    @Override
+    public boolean isTicking() {
+        return true;
+    }
+
+    // ----- Motion, teleports, removal
+
+    /** The entity's data as NBT (also for players), empty when it cannot be read. */
+    private java.util.Map<String, Object> nbt() {
+        String snbt = NativeAccess.entityData(this);
+        return snbt == null ? java.util.Map.of() : Snbt.compound(snbt);
+    }
+
+    private static double number(Object o) {
+        return o instanceof Number n ? n.doubleValue() : 0;
+    }
+
+    @Override
+    public org.bukkit.util.Vector getVelocity() {
+        if (nbt().get("Motion") instanceof List<?> m && m.size() == 3) {
+            return new org.bukkit.util.Vector(number(m.get(0)), number(m.get(1)), number(m.get(2)));
+        }
+        return new org.bukkit.util.Vector();
+    }
+
+    @Override
+    public void setVelocity(org.bukkit.util.Vector velocity) {
+        var s = Native.scratch();
+        MemorySegment v = s.alloc(Abi.Vec3.SIZE);
+        v.set(JAVA_DOUBLE, Abi.Vec3.x, velocity.getX());
+        v.set(JAVA_DOUBLE, Abi.Vec3.y, velocity.getY());
+        v.set(JAVA_DOUBLE, Abi.Vec3.z, velocity.getZ());
+        Ctx.check(Host.entity_set_velocity(Ctx.current, worldId(), s.uuid(uuid), v), "Entity.setVelocity");
+    }
+
+    @Override
+    public boolean teleport(Location location) {
+        return teleport(location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+    }
+
+    @Override
+    public boolean teleport(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {
+        if (location == null) {
+            return false;
+        }
+        Location to = location.clone();
+        if (to.getWorld() == null) {
+            to.setWorld(getWorld());
+        }
+        var s = Native.scratch();
+        MemorySegment loc = s.alloc(Abi.Location.SIZE);
+        Events.writeLocation(loc, 0, to);
+        return Host.entity_teleport(Ctx.current, worldId(), s.uuid(uuid), loc) == Abi.status.OK;
+    }
+
+    @Override
+    public boolean teleport(Entity destination) {
+        return teleport(destination.getLocation());
+    }
+
+    @Override
+    public boolean teleport(Entity destination, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {
+        return teleport(destination.getLocation(), cause);
+    }
+
+    @Override
+    public void remove() {
+        var s = Native.scratch();
+        Ctx.check(Host.entity_remove(Ctx.current, worldId(), s.uuid(uuid)), "Entity.remove");
+    }
+
+    @Override
+    public List<Entity> getNearbyEntities(double x, double y, double z) {
+        List<Entity> result = new ArrayList<>(world.getNearbyEntities(getLocation(), x, y, z));
+        result.remove(this);
+        return result;
+    }
+
+    // ----- Vehicles
+
+    @Override
+    public Entity getVehicle() {
+        var s = Native.scratch();
+        MemorySegment out = s.alloc(Abi.Uuid.SIZE);
+        int status = Host.entity_vehicle(Ctx.current, worldId(), s.uuid(uuid), out);
+        if (status == Abi.status.NOT_FOUND) {
+            return null;
+        }
+        Ctx.check(status, "Entity.getVehicle");
+        return WorldEvents.entity(world, Native.uuid(out), null);
+    }
+
+    @Override
+    public boolean isInsideVehicle() {
+        return getVehicle() != null;
+    }
+
+    @Override
+    public boolean leaveVehicle() {
+        if (!isInsideVehicle()) {
+            return false;
+        }
+        var s = Native.scratch();
+        return Host.entity_dismount(Ctx.current, worldId(), s.uuid(uuid)) == Abi.status.OK;
+    }
+
+    @Override
+    public boolean addPassenger(Entity passenger) {
+        if (passenger == null || passenger.equals(this)) {
+            return false;
+        }
+        var s = Native.scratch();
+        MemorySegment rider = s.uuid(passenger.getUniqueId());
+        return Host.entity_mount(Ctx.current, worldId(), rider, s.uuid(uuid)) == Abi.status.OK;
+    }
+
+    @Override
+    public boolean removePassenger(Entity passenger) {
+        if (passenger == null || !this.equals(passenger.getVehicle())) {
+            return false;
+        }
+        return passenger.leaveVehicle();
+    }
+
+    @Override
+    public boolean eject() {
+        boolean any = false;
+        for (Entity p : getPassengers()) {
+            any |= p.leaveVehicle();
+        }
+        return any;
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public Entity getPassenger() {
+        List<Entity> passengers = getPassengers();
+        return passengers.isEmpty() ? null : passengers.get(0);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public boolean setPassenger(Entity passenger) {
+        eject();
+        return passenger == null || addPassenger(passenger);
+    }
+
+    // ----- Names and messages
+
+    @Override
+    public String getName() {
+        String custom = getCustomName();
+        if (custom != null) {
+            return custom;
+        }
+        StringBuilder b = new StringBuilder();
+        for (String word : getType().name().toLowerCase(java.util.Locale.ROOT).split("_")) {
+            if (!word.isEmpty()) {
+                b.append(b.isEmpty() ? "" : " ").append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+            }
+        }
+        return b.toString();
+    }
+
+    @Override
+    public net.kyori.adventure.text.Component name() {
+        net.kyori.adventure.text.Component custom = customName();
+        return custom != null ? custom : net.kyori.adventure.text.Component.text(getName());
+    }
+
+    @Override
+    public net.kyori.adventure.text.Component customName() {
+        var s = Native.scratch();
+        MemorySegment buf = s.strBuf(4096);
+        int status = Host.entity_name(Ctx.current, worldId(), s.uuid(uuid), buf);
+        if (status == Abi.status.NOT_FOUND) {
+            return null;
+        }
+        Ctx.check(status, "Entity.customName");
+        return net.kyori.adventure.text.serializer.gson.GsonComponentSerializer.gson().deserialize(Native.string(buf, true));
+    }
+
+    @Override
+    public void customName(net.kyori.adventure.text.Component name) {
+        var s = Native.scratch();
+        String json = name == null ? "" : Texts.json(name);
+        Ctx.check(Host.entity_set_name(Ctx.current, worldId(), s.uuid(uuid), s.str(json), Abi.text_format.JSON),
+                "Entity.customName");
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public String getCustomName() {
+        net.kyori.adventure.text.Component c = customName();
+        return c == null ? null : net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection().serialize(c);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void setCustomName(String name) {
+        customName(name == null || name.isEmpty() ? null : Texts.legacy(name));
+    }
+
+    /** Messages to entities that are not players go nowhere, as on Paper. */
+    @Override
+    public void sendMessage(String message) {}
+
+    @Override
+    public void sendMessage(String... messages) {}
+
+    @Override
+    public void sendMessage(UUID sender, String message) {}
+
+    @Override
+    public void sendMessage(UUID sender, String... messages) {}
+
+    @Override
+    public String getScoreboardEntryName() {
+        return uuid.toString();
+    }
+
+    @Override
+    public java.util.Set<String> getScoreboardTags() {
+        java.util.Set<String> tags = new java.util.LinkedHashSet<>();
+        if (nbt().get("Tags") instanceof List<?> l) {
+            for (Object o : l) {
+                tags.add(String.valueOf(o));
+            }
+        }
+        return tags;
+    }
+
+    @Override
+    public boolean addScoreboardTag(String tag) {
+        java.util.Set<String> tags = getScoreboardTags();
+        if (tags.size() >= 1024 || !tags.add(tag)) {
+            return false;
+        }
+        return writeTags(tags);
+    }
+
+    @Override
+    public boolean removeScoreboardTag(String tag) {
+        java.util.Set<String> tags = getScoreboardTags();
+        return tags.remove(tag) && writeTags(tags);
+    }
+
+    private boolean writeTags(java.util.Set<String> tags) {
+        var s = Native.scratch();
+        String snbt = "{Tags:" + Snbt.write(new ArrayList<>(tags)) + "}";
+        return Host.entity_nbt_merge(Ctx.current, worldId(), s.uuid(uuid), s.str(snbt)) == Abi.status.OK;
+    }
+
+    // ----- Permissions: an entity that is not a player has the defaults, as on Paper.
+
+    private org.bukkit.permissions.PermissibleBase entityPerm;
+
+    private org.bukkit.permissions.PermissibleBase entityPerm() {
+        if (entityPerm == null) {
+            entityPerm = new org.bukkit.permissions.PermissibleBase(this);
+        }
+        return entityPerm;
+    }
+
+    @Override
+    public boolean isOp() {
+        return false;
+    }
+
+    @Override
+    public void setOp(boolean value) {
+        throw new UnsupportedOperationException("Cannot change op value for an entity");
+    }
+
+    @Override
+    public boolean isPermissionSet(String name) {
+        return entityPerm().isPermissionSet(name);
+    }
+
+    @Override
+    public boolean isPermissionSet(org.bukkit.permissions.Permission perm) {
+        return entityPerm().isPermissionSet(perm);
+    }
+
+    @Override
+    public boolean hasPermission(String name) {
+        return entityPerm().hasPermission(name);
+    }
+
+    @Override
+    public boolean hasPermission(org.bukkit.permissions.Permission perm) {
+        return entityPerm().hasPermission(perm);
+    }
+
+    @Override
+    public org.bukkit.permissions.PermissionAttachment addAttachment(org.bukkit.plugin.Plugin plugin, String name, boolean value) {
+        return entityPerm().addAttachment(plugin, name, value);
+    }
+
+    @Override
+    public org.bukkit.permissions.PermissionAttachment addAttachment(org.bukkit.plugin.Plugin plugin) {
+        return entityPerm().addAttachment(plugin);
+    }
+
+    @Override
+    public org.bukkit.permissions.PermissionAttachment addAttachment(org.bukkit.plugin.Plugin plugin, String name, boolean value,
+            int ticks) {
+        return entityPerm().addAttachment(plugin, name, value, ticks);
+    }
+
+    @Override
+    public org.bukkit.permissions.PermissionAttachment addAttachment(org.bukkit.plugin.Plugin plugin, int ticks) {
+        return entityPerm().addAttachment(plugin, ticks);
+    }
+
+    @Override
+    public void removeAttachment(org.bukkit.permissions.PermissionAttachment attachment) {
+        entityPerm().removeAttachment(attachment);
+    }
+
+    @Override
+    public void recalculatePermissions() {
+        entityPerm().recalculatePermissions();
+    }
+
+    @Override
+    public java.util.Set<org.bukkit.permissions.PermissionAttachmentInfo> getEffectivePermissions() {
+        return entityPerm().getEffectivePermissions();
+    }
+
+    // ----- What LivingEntity asks often (plain public methods, see above)
+
+    public double getMaxHealth() {
+        return prop(Abi.entity_prop.MAX_HEALTH, 20);
+    }
+
+    public double getAbsorptionAmount() {
+        return prop(Abi.entity_prop.ABSORPTION, 0);
+    }
+
+    public void setAbsorptionAmount(double amount) {
+        if (amount < 0 || !Double.isFinite(amount)) {
+            throw new IllegalArgumentException("amount < 0 or non-finite");
+        }
+        setProp(Abi.entity_prop.ABSORPTION, amount, "LivingEntity.setAbsorptionAmount");
+    }
+
+    public int getRemainingAir() {
+        return (int) prop(Abi.entity_prop.AIR, 300);
+    }
+
+    public void setRemainingAir(int ticks) {
+        setProp(Abi.entity_prop.AIR, ticks, "LivingEntity.setRemainingAir");
+    }
+
+    public int getMaximumAir() {
+        return 300;
+    }
+
+    public boolean hasAI() {
+        return prop(Abi.entity_prop.NO_AI, 0) == 0;
+    }
+
+    public void setAI(boolean ai) {
+        setProp(Abi.entity_prop.NO_AI, ai ? 0 : 1, "LivingEntity.setAI");
+    }
+
+    public boolean isCollidable() {
+        return true;
+    }
+
+    public boolean addPotionEffect(org.bukkit.potion.PotionEffect effect) {
+        var s = Native.scratch();
+        int flags = (effect.isAmbient() ? Abi.effect_flag.AMBIENT : 0)
+                | (effect.hasParticles() ? 0 : Abi.effect_flag.HIDE_PARTICLES)
+                | (effect.hasIcon() ? 0 : Abi.effect_flag.HIDE_ICON);
+        int duration = effect.isInfinite() ? -1 : effect.getDuration();
+        return Host.entity_effect_add(Ctx.current, worldId(), s.uuid(uuid), s.str(effect.getType().getKey().toString()),
+                duration, effect.getAmplifier(), flags) == Abi.status.OK;
+    }
+
+    public boolean addPotionEffects(java.util.Collection<org.bukkit.potion.PotionEffect> effects) {
+        boolean all = true;
+        for (org.bukkit.potion.PotionEffect e : effects) {
+            all &= addPotionEffect(e);
+        }
+        return all;
+    }
+
+    public void removePotionEffect(org.bukkit.potion.PotionEffectType type) {
+        var s = Native.scratch();
+        Host.entity_effect_remove(Ctx.current, worldId(), s.uuid(uuid), s.str(type.getKey().toString()));
+    }
+
+    public boolean clearActivePotionEffects() {
+        if (getActivePotionEffects().isEmpty()) {
+            return false;
+        }
+        var s = Native.scratch();
+        return Host.entity_effect_remove(Ctx.current, worldId(), s.uuid(uuid), s.str("")) == Abi.status.OK;
+    }
+
+    public java.util.Collection<org.bukkit.potion.PotionEffect> getActivePotionEffects() {
+        List<org.bukkit.potion.PotionEffect> out = new ArrayList<>();
+        if (nbt().get("active_effects") instanceof List<?> list) {
+            for (Object o : list) {
+                if (o instanceof java.util.Map<?, ?> m) {
+                    NamespacedKey key = NamespacedKey.fromString(String.valueOf(m.get("id")));
+                    org.bukkit.potion.PotionEffectType type = key == null ? null : org.bukkit.Registry.EFFECT.get(key);
+                    if (type == null) {
+                        continue;
+                    }
+                    int duration = (int) number(m.get("duration"));
+                    out.add(new org.bukkit.potion.PotionEffect(type, duration, (int) number(m.get("amplifier")),
+                            flag(m.get("ambient"), false), flag(m.get("show_particles"), true), flag(m.get("show_icon"), true)));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static boolean flag(Object o, boolean fallback) {
+        if (o instanceof Boolean b) {
+            return b;
+        }
+        return o instanceof Number n ? n.intValue() != 0 : fallback;
+    }
+
+    public org.bukkit.potion.PotionEffect getPotionEffect(org.bukkit.potion.PotionEffectType type) {
+        for (org.bukkit.potion.PotionEffect e : getActivePotionEffects()) {
+            if (e.getType().equals(type)) {
+                return e;
+            }
+        }
+        return null;
+    }
+
+    public boolean hasPotionEffect(org.bukkit.potion.PotionEffectType type) {
+        return getPotionEffect(type) != null;
+    }
+
         @Override
     public boolean equals(Object o) {
         return o instanceof VEntity e && e.uuid.equals(uuid);

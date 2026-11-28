@@ -7,6 +7,8 @@ import dev.vanillite.jvm.abi.Host;
 import java.lang.foreign.MemorySegment;
 import java.lang.invoke.MethodHandle;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import net.kyori.adventure.text.Component;
@@ -440,17 +442,6 @@ public abstract class VPlayer extends CraftHumanEntity implements Player {
         return false;
     }
 
-    /** Riding is not reported to plugins yet: no vehicle. */
-    @Override
-    public org.bukkit.entity.Entity getVehicle() {
-        return null;
-    }
-
-    @Override
-    public boolean isInsideVehicle() {
-        return false;
-    }
-
     /** Level events (sounds, particles) are not sent for plugins yet: plugins' effects stay invisible. */
     @Override
     public void playEffect(org.bukkit.Location location, org.bukkit.Effect effect, int data) {}
@@ -834,6 +825,397 @@ public abstract class VPlayer extends CraftHumanEntity implements Player {
     @Override
     public boolean teleport(org.bukkit.entity.Entity destination, PlayerTeleportEvent.TeleportCause cause) {
         return teleport(destination.getLocation(), cause);
+    }
+
+    // ----- Food, experience, hands
+
+    @Override
+    public float getSaturation() {
+        return (float) get(Abi.player_prop.SATURATION);
+    }
+
+    @Override
+    public void setSaturation(float value) {
+        set(Abi.player_prop.SATURATION, Math.max(0, Math.min(value, getFoodLevel())));
+    }
+
+    @Override
+    public float getExhaustion() {
+        return (float) get(Abi.player_prop.EXHAUSTION);
+    }
+
+    @Override
+    public void setExhaustion(float value) {
+        set(Abi.player_prop.EXHAUSTION, Math.max(0, Math.min(value, 40)));
+    }
+
+    @Override
+    public void setLevel(int level) {
+        set(Abi.player_prop.XP_LEVEL, Math.max(0, level));
+    }
+
+    @Override
+    public void setExp(float exp) {
+        if (exp < 0 || exp > 1) {
+            throw new IllegalArgumentException("Experience progress must be between 0.0 and 1.0 (" + exp + ")");
+        }
+        set(Abi.player_prop.XP_PROGRESS, exp);
+    }
+
+    /** Points from a level to the next (Vanilla's getXpNeededForNextLevel). */
+    private static int xpNeeded(int level) {
+        return level >= 30 ? 112 + (level - 30) * 9 : level >= 15 ? 37 + (level - 15) * 5 : 7 + level * 2;
+    }
+
+    @Override
+    public int getExpToLevel() {
+        return xpNeeded(getLevel());
+    }
+
+    /**
+     * Vanilla's giveExperiencePoints on level and progress. The total the server keeps for the
+     * death score cannot be written by plugins yet and stays as it is.
+     */
+    @Override
+    public void giveExp(int amount, boolean applyMending) {
+        int level = getLevel();
+        float progress = getExp() + (float) amount / xpNeeded(level);
+        while (progress < 0) {
+            float points = progress * xpNeeded(level);
+            if (level > 0) {
+                level--;
+                progress = 1 + points / xpNeeded(level);
+            } else {
+                progress = 0;
+            }
+        }
+        while (progress >= 1) {
+            progress = (progress - 1) * xpNeeded(level);
+            level++;
+            progress /= xpNeeded(level);
+        }
+        setLevel(level);
+        set(Abi.player_prop.XP_PROGRESS, progress);
+    }
+
+    @Override
+    public void giveExpLevels(int amount) {
+        int level = getLevel() + amount;
+        if (level < 0) {
+            setLevel(0);
+            set(Abi.player_prop.XP_PROGRESS, 0);
+        } else {
+            setLevel(level);
+        }
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public org.bukkit.inventory.ItemStack getItemInHand() {
+        return getInventory().getItemInMainHand();
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void setItemInHand(org.bukkit.inventory.ItemStack item) {
+        getInventory().setItemInMainHand(item);
+    }
+
+    @Override
+    public org.bukkit.inventory.MainHand getMainHand() {
+        return org.bukkit.inventory.MainHand.RIGHT;
+    }
+
+    @Override
+    public void updateInventory() {
+        // The server keeps the client's inventory in sync after every change a plugin makes.
+    }
+
+    @Override
+    public String getScoreboardEntryName() {
+        return name;
+    }
+
+    @Override
+    public void remove() {
+        throw new UnsupportedOperationException("Calling Entity#remove on players produces undefined (bad) behavior");
+    }
+
+    @Override
+    public long getPlayerTime() {
+        return getWorld().getFullTime();
+    }
+
+    @Override
+    public int getPing() {
+        var s = Native.scratch();
+        MemorySegment info = s.alloc(Abi.PlayerInfo.SIZE);
+        info.set(JAVA_INT, Abi.PlayerInfo.size, (int) Abi.PlayerInfo.SIZE);
+        if (Host.player_info(Native.plugin, s.uuid(uuid), info) != Abi.status.OK) {
+            return 0;
+        }
+        return info.get(JAVA_INT, Abi.PlayerInfo.ping);
+    }
+
+    @Override
+    public int getProtocolVersion() {
+        var s = Native.scratch();
+        MemorySegment out = s.alloc(4);
+        Ctx.check(Host.protocol_version(Native.plugin, out), "Player.getProtocolVersion");
+        return out.get(JAVA_INT, 0);
+    }
+
+    // ----- Eyes and what the player looks at
+
+    @Override
+    public double getEyeHeight() {
+        return getEyeHeight(false);
+    }
+
+    @Override
+    public double getEyeHeight(boolean ignorePose) {
+        // Vanilla's player dimensions: standing 1.62, crouching 1.27.
+        return !ignorePose && isSneaking() ? 1.27 : 1.62;
+    }
+
+    @Override
+    public Location getEyeLocation() {
+        Location at = getLocation();
+        at.setY(at.getY() + getEyeHeight());
+        return at;
+    }
+
+    private List<org.bukkit.block.Block> lineOfSight(java.util.Set<org.bukkit.Material> transparent, int maxDistance,
+            int maxLength) {
+        if (maxDistance > 120) {
+            maxDistance = 120;
+        }
+        List<org.bukkit.block.Block> blocks = new ArrayList<>();
+        java.util.Iterator<org.bukkit.block.Block> it = new org.bukkit.util.BlockIterator(this, maxDistance);
+        while (it.hasNext()) {
+            org.bukkit.block.Block block = it.next();
+            blocks.add(block);
+            if (maxLength != 0 && blocks.size() > maxLength) {
+                blocks.remove(0);
+            }
+            org.bukkit.Material type = block.getType();
+            if (transparent == null ? !type.isAir() : !transparent.contains(type)) {
+                break;
+            }
+        }
+        return blocks;
+    }
+
+    @Override
+    public List<org.bukkit.block.Block> getLineOfSight(java.util.Set<org.bukkit.Material> transparent, int maxDistance) {
+        return lineOfSight(transparent, maxDistance, 0);
+    }
+
+    @Override
+    public org.bukkit.block.Block getTargetBlock(java.util.Set<org.bukkit.Material> transparent, int maxDistance) {
+        List<org.bukkit.block.Block> blocks = lineOfSight(transparent, maxDistance, 1);
+        return blocks.get(0);
+    }
+
+    @Override
+    public List<org.bukkit.block.Block> getLastTwoTargetBlocks(java.util.Set<org.bukkit.Material> transparent, int maxDistance) {
+        return lineOfSight(transparent, maxDistance, 2);
+    }
+
+    @Override
+    public org.bukkit.block.Block getTargetBlockExact(int maxDistance, org.bukkit.FluidCollisionMode mode) {
+        org.bukkit.util.RayTraceResult hit = rayTraceBlocks(maxDistance, mode);
+        return hit == null ? null : hit.getHitBlock();
+    }
+
+    @Override
+    public org.bukkit.util.RayTraceResult rayTraceBlocks(double maxDistance, org.bukkit.FluidCollisionMode mode) {
+        Location eye = getEyeLocation();
+        return getWorld().rayTraceBlocks(eye, eye.getDirection(), maxDistance, mode, false);
+    }
+
+    // ----- Titles, action bar, tab list
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void sendTitle(String title, String subtitle) {
+        sendTitle(title, subtitle, 10, 70, 20);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+        var s = Native.scratch();
+        MemorySegment spec = s.alloc(Abi.TitleSpec.SIZE);
+        spec.set(JAVA_INT, Abi.TitleSpec.size, (int) Abi.TitleSpec.SIZE);
+        spec.asSlice(Abi.TitleSpec.title, Abi.Str.SIZE).copyFrom(s.str(title == null || title.isEmpty() ? "" : Texts.legacyJson(title)));
+        spec.asSlice(Abi.TitleSpec.subtitle, Abi.Str.SIZE).copyFrom(
+                s.str(subtitle == null || subtitle.isEmpty() ? "" : Texts.legacyJson(subtitle)));
+        spec.set(JAVA_INT, Abi.TitleSpec.format, Abi.text_format.JSON);
+        spec.set(JAVA_INT, Abi.TitleSpec.fade_in, fadeIn < 0 ? 10 : fadeIn);
+        spec.set(JAVA_INT, Abi.TitleSpec.stay, stay < 0 ? 70 : stay);
+        spec.set(JAVA_INT, Abi.TitleSpec.fade_out, fadeOut < 0 ? 20 : fadeOut);
+        Host.player_send_title(Native.plugin, s.uuid(uuid), spec);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void sendActionBar(String message) {
+        var s = Native.scratch();
+        Host.player_send_action_bar(Native.plugin, s.uuid(uuid), s.str(Texts.legacyJson(message == null ? "" : message)),
+                Abi.text_format.JSON);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void sendActionBar(char alternateChar, String message) {
+        sendActionBar(org.bukkit.ChatColor.translateAlternateColorCodes(alternateChar, message));
+    }
+
+    private String tabHeader = "";
+    private String tabFooter = "";
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void setPlayerListHeaderFooter(String header, String footer) {
+        tabHeader = header == null ? "" : header;
+        tabFooter = footer == null ? "" : footer;
+        var s = Native.scratch();
+        Host.player_set_tab_list(Native.plugin, s.uuid(uuid), s.str(Texts.legacyJson(tabHeader)),
+                s.str(Texts.legacyJson(tabFooter)), Abi.text_format.JSON);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void setPlayerListHeader(String header) {
+        setPlayerListHeaderFooter(header, tabFooter);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void setPlayerListFooter(String footer) {
+        setPlayerListHeaderFooter(tabHeader, footer);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public String getPlayerListHeader() {
+        return tabHeader.isEmpty() ? null : tabHeader;
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public String getPlayerListFooter() {
+        return tabFooter.isEmpty() ? null : tabFooter;
+    }
+
+    // ----- Sounds
+
+    /** The host's sound source of a category. */
+    static int source(org.bukkit.SoundCategory category) {
+        return switch (category == null ? org.bukkit.SoundCategory.MASTER : category) {
+            case MASTER -> Abi.sound_source.MASTER;
+            case MUSIC -> Abi.sound_source.MUSIC;
+            case RECORDS -> Abi.sound_source.RECORD;
+            case WEATHER -> Abi.sound_source.WEATHER;
+            case BLOCKS -> Abi.sound_source.BLOCK;
+            case HOSTILE -> Abi.sound_source.HOSTILE;
+            case NEUTRAL -> Abi.sound_source.NEUTRAL;
+            case PLAYERS -> Abi.sound_source.PLAYER;
+            case AMBIENT -> Abi.sound_source.AMBIENT;
+            case VOICE -> Abi.sound_source.VOICE;
+            case UI -> Abi.sound_source.UI;
+        };
+    }
+
+    /** Plays a sound (key such as {@code minecraft:entity.experience_orb.pickup}) to this player. */
+    void sound(String key, int source, double x, double y, double z, float volume, float pitch, long seed) {
+        var s = Native.scratch();
+        MemorySegment spec = s.alloc(Abi.SoundSpec.SIZE);
+        spec.set(JAVA_INT, Abi.SoundSpec.size, (int) Abi.SoundSpec.SIZE);
+        spec.asSlice(Abi.SoundSpec.sound, Abi.Str.SIZE).copyFrom(s.str(key));
+        spec.set(JAVA_INT, Abi.SoundSpec.source, source);
+        spec.set(JAVA_DOUBLE, Abi.SoundSpec.pos + Abi.Vec3.x, x);
+        spec.set(JAVA_DOUBLE, Abi.SoundSpec.pos + Abi.Vec3.y, y);
+        spec.set(JAVA_DOUBLE, Abi.SoundSpec.pos + Abi.Vec3.z, z);
+        spec.set(java.lang.foreign.ValueLayout.JAVA_FLOAT, Abi.SoundSpec.volume, volume);
+        spec.set(java.lang.foreign.ValueLayout.JAVA_FLOAT, Abi.SoundSpec.pitch, pitch);
+        spec.set(java.lang.foreign.ValueLayout.JAVA_LONG, Abi.SoundSpec.seed, seed);
+        Host.player_play_sound(Native.plugin, s.uuid(uuid), spec);
+    }
+
+    static String soundKey(org.bukkit.Sound sound) {
+        return sound.key().asString();
+    }
+
+    @Override
+    public void playSound(Location location, org.bukkit.Sound sound, org.bukkit.SoundCategory category, float volume,
+            float pitch, long seed) {
+        if (location != null && sound != null) {
+            sound(soundKey(sound), source(category), location.getX(), location.getY(), location.getZ(), volume, pitch, seed);
+        }
+    }
+
+    @Override
+    public void playSound(Location location, org.bukkit.Sound sound, org.bukkit.SoundCategory category, float volume,
+            float pitch) {
+        playSound(location, sound, category, volume, pitch, java.util.concurrent.ThreadLocalRandom.current().nextLong());
+    }
+
+    @Override
+    public void playSound(Location location, String sound, org.bukkit.SoundCategory category, float volume, float pitch,
+            long seed) {
+        if (location != null && sound != null) {
+            sound(sound, source(category), location.getX(), location.getY(), location.getZ(), volume, pitch, seed);
+        }
+    }
+
+    @Override
+    public void playSound(Location location, String sound, org.bukkit.SoundCategory category, float volume, float pitch) {
+        playSound(location, sound, category, volume, pitch, java.util.concurrent.ThreadLocalRandom.current().nextLong());
+    }
+
+    @Override
+    public void playSound(org.bukkit.entity.Entity entity, org.bukkit.Sound sound, org.bukkit.SoundCategory category,
+            float volume, float pitch, long seed) {
+        playSound(entity.getLocation(), sound, category, volume, pitch, seed);
+    }
+
+    @Override
+    public void playSound(org.bukkit.entity.Entity entity, org.bukkit.Sound sound, org.bukkit.SoundCategory category,
+            float volume, float pitch) {
+        playSound(entity.getLocation(), sound, category, volume, pitch);
+    }
+
+    @Override
+    public void playSound(org.bukkit.entity.Entity entity, String sound, org.bukkit.SoundCategory category, float volume,
+            float pitch, long seed) {
+        playSound(entity.getLocation(), sound, category, volume, pitch, seed);
+    }
+
+    @Override
+    public void playSound(org.bukkit.entity.Entity entity, String sound, org.bukkit.SoundCategory category, float volume,
+            float pitch) {
+        playSound(entity.getLocation(), sound, category, volume, pitch);
+    }
+
+    @Override
+    public void stopSound(org.bukkit.SoundCategory category) {
+        var s = Native.scratch();
+        Host.player_stop_sound(Native.plugin, s.uuid(uuid), s.str(""), source(category));
+    }
+
+    @Override
+    public void stopSound(String sound, org.bukkit.SoundCategory category) {
+        var s = Native.scratch();
+        Host.player_stop_sound(Native.plugin, s.uuid(uuid), s.str(sound == null ? "" : sound),
+                category == null ? Abi.sound_source.ANY : source(category));
+    }
+
+    @Override
+    public void stopAllSounds() {
+        var s = Native.scratch();
+        Host.player_stop_sound(Native.plugin, s.uuid(uuid), s.str(""), Abi.sound_source.ANY);
     }
 
     @Override
