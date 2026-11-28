@@ -175,6 +175,145 @@ public abstract class VBlock implements Block {
     }
 
     @Override
+    public Location getLocation(Location loc) {
+        if (loc != null) {
+            loc.setWorld(world);
+            loc.set(x, y, z);
+            loc.setYaw(0);
+            loc.setPitch(0);
+        }
+        return loc;
+    }
+
+    @Override
+    public Block getRelative(BlockFace face, int distance) {
+        return getRelative(face.getModX() * distance, face.getModY() * distance, face.getModZ() * distance);
+    }
+
+    @Override
+    public BlockFace getFace(Block block) {
+        for (BlockFace face : BlockFace.values()) {
+            if (block.getX() == x + face.getModX() && block.getY() == y + face.getModY() && block.getZ() == z + face.getModZ()) {
+                return face;
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public org.bukkit.Chunk getChunk() {
+        return world.getChunkAt(x >> 4, z >> 4);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public byte getData() {
+        return 0;
+    }
+
+    /** {@code {sky, block}} light here. */
+    private int[] light() {
+        var s = Native.scratch();
+        MemorySegment sky = s.alloc(4);
+        MemorySegment block = s.alloc(4);
+        int status = Host.light_get(Ctx.current, world.id, pos(s), sky, block);
+        if (status == Abi.status.NOT_FOUND) {
+            return new int[] {0, 0};
+        }
+        Ctx.check(status, "Block light");
+        return new int[] {sky.get(JAVA_INT, 0), block.get(JAVA_INT, 0)};
+    }
+
+    @Override
+    public byte getLightFromSky() {
+        return (byte) light()[0];
+    }
+
+    @Override
+    public byte getLightFromBlocks() {
+        return (byte) light()[1];
+    }
+
+    @Override
+    public boolean isSolid() {
+        return getType().isSolid();
+    }
+
+    @Override
+    public boolean isBurnable() {
+        return getType().isBurnable();
+    }
+
+    @Override
+    public boolean isReplaceable() {
+        int[] info = NativeAccess.blockType(getType().getKey().toString());
+        return info != null && (info[3] & Abi.block_type_flag.REPLACEABLE) != 0;
+    }
+
+    @Override
+    public String translationKey() {
+        return getType().getBlockTranslationKey();
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public String getTranslationKey() {
+        return translationKey();
+    }
+
+    @Override
+    public void setBiome(org.bukkit.block.Biome biome) {
+        NativeAccess.setBiome(world, x, y, z, x, y, z, biome.getKey().toString());
+    }
+
+    // ----- Metadata (Metadatable): per block position, kept for the server's lifetime as
+    // Bukkit's block metadata store does.
+
+    private static final java.util.Map<Block, java.util.Map<String, java.util.List<org.bukkit.metadata.MetadataValue>>> METADATA =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    @Override
+    public void setMetadata(String key, org.bukkit.metadata.MetadataValue value) {
+        var owner = value.getOwningPlugin();
+        if (owner == null) {
+            throw new IllegalArgumentException("Plugin cannot be null");
+        }
+        var values = METADATA.computeIfAbsent(this, b -> new java.util.concurrent.ConcurrentHashMap<>())
+                .computeIfAbsent(key, k -> new java.util.concurrent.CopyOnWriteArrayList<>());
+        values.removeIf(v -> v.getOwningPlugin() == owner);
+        values.add(value);
+    }
+
+    @Override
+    public java.util.List<org.bukkit.metadata.MetadataValue> getMetadata(String key) {
+        var map = METADATA.get(this);
+        var values = map == null ? null : map.get(key);
+        return values == null ? java.util.List.of() : java.util.List.copyOf(values);
+    }
+
+    @Override
+    public boolean hasMetadata(String key) {
+        var map = METADATA.get(this);
+        var values = map == null ? null : map.get(key);
+        return values != null && !values.isEmpty();
+    }
+
+    @Override
+    public void removeMetadata(String key, org.bukkit.plugin.Plugin owner) {
+        var map = METADATA.get(this);
+        var values = map == null ? null : map.get(key);
+        if (values != null) {
+            values.removeIf(v -> v.getOwningPlugin() == owner);
+            if (values.isEmpty()) {
+                map.remove(key);
+                if (map.isEmpty()) {
+                    METADATA.remove(this);
+                }
+            }
+        }
+    }
+
+    @Override
     public boolean equals(Object o) {
         return o instanceof VBlock b && b.world == world && b.x == x && b.y == y && b.z == z;
     }

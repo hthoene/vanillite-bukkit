@@ -115,6 +115,22 @@ final class KeyedClasses {
         }
 
         @Override
+        public String getName() {
+            return key.getKey();
+        }
+
+        /** Boolean or Integer, from the server's current value. */
+        @Override
+        @SuppressWarnings("unchecked")
+        public Class<T> getType() {
+            var s = Native.scratch();
+            java.lang.foreign.MemorySegment buf = s.strBuf(256);
+            String value = dev.vanillite.jvm.abi.Host.game_rule_get(Native.plugin, s.str(key.getKey()), buf)
+                    == dev.vanillite.jvm.abi.Abi.status.OK ? Native.string(buf, true).strip() : "";
+            return (Class<T>) (value.equals("true") || value.equals("false") ? Boolean.class : Integer.class);
+        }
+
+        @Override
         public NamespacedKey getKey() {
             return key;
         }

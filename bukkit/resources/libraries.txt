@@ -50,3 +50,8 @@ org.apache.httpcomponents:httpcore:4.4.16 51cf043c87253c9f58b539c9f7e44c88942238
 commons-codec:commons-codec:1.16.0 4e3eb3d79888d76b54e28b350915b5dc3919c9de
 org.slf4j:jcl-over-slf4j:1.7.36 d877e195a05aca4a2f1ad2ff14bfec1393af4b5e
 com.googlecode.json-simple:json-simple:1.1.1 c9ad4a0850ab676c5c64461a05ca524cdfff59f1
+# What Paper also puts on the class path of plugins: JDBC drivers (SQLite, MySQL) and commons-lang 2
+org.xerial:sqlite-jdbc:3.49.1.0 145d3a6819b86f3618728273329392269104c8c7
+com.mysql:mysql-connector-j:9.2.0 cc7bed59ccee3c47554aeb89e37c24d95a74bec3
+com.google.protobuf:protobuf-java:4.29.0 ffea90ab158435d68de76951857ef5f8b0f98365
+commons-lang:commons-lang:2.6 0ce1edb914c94ebc388f086c6827e8bdeec71ac2

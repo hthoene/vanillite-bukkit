@@ -15,6 +15,10 @@ Class and member names that plugins refer to are used as names only.
 Not part of this repository and never distributed with it: the Paper API jar and its
 libraries (downloaded from their Maven repositories when the layer starts for the first time,
 checked by SHA-1; see bukkit/resources/libraries.txt) and any Minecraft server jar.
+Among those libraries are the ones Paper also puts on the class path of plugins: SQLite JDBC
+(org.xerial:sqlite-jdbc, Apache-2.0), MySQL Connector/J (com.mysql:mysql-connector-j, GPL-2.0
+with the Universal FOSS Exception) with Protocol Buffers (com.google.protobuf:protobuf-java,
+BSD-3-Clause), and Apache Commons Lang 2 (commons-lang:commons-lang, Apache-2.0).
 
 Uses at build or run time: vanillite-abi (Apache-2.0), libloading (ISC), jni-sys (MIT or
 Apache-2.0).

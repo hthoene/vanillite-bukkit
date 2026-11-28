@@ -18,6 +18,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
 import static java.lang.foreign.ValueLayout.JAVA_DOUBLE;
+import static java.lang.foreign.ValueLayout.JAVA_INT;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
 /** A Vanillite world (dimension) as a Bukkit {@link World}: a thin wrapper around its id. */
@@ -328,6 +329,449 @@ public abstract class VWorld implements World {
                 sink.accept(player != null ? player : VEntity.create(this, uuid));
             }
             return;
+        }
+    }
+
+    @Override
+    public org.bukkit.NamespacedKey getKey() {
+        return org.bukkit.NamespacedKey.fromString(key);
+    }
+
+    @Override
+    public net.kyori.adventure.key.Key key() {
+        return getKey();
+    }
+
+    @Override
+    public long getSeed() {
+        var s = Native.scratch();
+        MemorySegment details = s.alloc(Abi.WorldDetails.SIZE);
+        details.set(JAVA_INT, Abi.WorldDetails.size, (int) Abi.WorldDetails.SIZE);
+        Ctx.check(Host.world_info(Native.plugin, id, details, s.strBuf(1024)), "World.getSeed");
+        return details.get(JAVA_LONG, Abi.WorldDetails.seed);
+    }
+
+    @Override
+    public int getSeaLevel() {
+        return switch (getEnvironment()) {
+            case NETHER -> 32;
+            case THE_END -> 0;
+            default -> 63;
+        };
+    }
+
+    @Override
+    public Entity getEntity(UUID uuid) {
+        VPlayer player = Layer.server.players.get(uuid);
+        if (player != null) {
+            return player.getWorld() == this ? player : null;
+        }
+        var s = Native.scratch();
+        MemorySegment buf = s.strBuf(128);
+        if (Host.entity_type(Ctx.current, id, s.uuid(uuid), buf) != Abi.status.OK) {
+            return null;
+        }
+        return VEntity.create(this, uuid, VEntity.typeOf(Native.string(buf, true)));
+    }
+
+    @Override
+    public int getEntityCount() {
+        return getEntities().size();
+    }
+
+    @Override
+    public int getPlayerCount() {
+        return getPlayers().size();
+    }
+
+    @Override
+    public boolean getAllowAnimals() {
+        return true;
+    }
+
+    @Override
+    public boolean getAllowMonsters() {
+        return true;
+    }
+
+    @Override
+    public boolean isAutoSave() {
+        return true;
+    }
+
+    // ----- Blocks by position
+
+    @Override
+    public org.bukkit.Material getType(int x, int y, int z) {
+        return getBlockAt(x, y, z).getType();
+    }
+
+    @Override
+    public org.bukkit.block.data.BlockData getBlockData(int x, int y, int z) {
+        return getBlockAt(x, y, z).getBlockData();
+    }
+
+    @Override
+    public org.bukkit.block.BlockState getBlockState(int x, int y, int z) {
+        return getBlockAt(x, y, z).getState();
+    }
+
+    /**
+     * The Y of the highest block that blocks motion or holds a fluid (the {@code MOTION_BLOCKING}
+     * height map), the world's lowest Y minus one in an empty or unloaded column.
+     */
+    @Override
+    public int getHighestBlockYAt(int x, int z) {
+        for (int y = getMaxHeight() - 1; y >= getMinHeight(); y--) {
+            int state = NativeAccess.state(this, x, y, z);
+            if (state < 0) {
+                break;
+            }
+            org.bukkit.Material type = Materials.of(state);
+            if (type.isSolid() || type == org.bukkit.Material.WATER || type == org.bukkit.Material.LAVA
+                    || type == org.bukkit.Material.BUBBLE_COLUMN) {
+                return y;
+            }
+            String name = NativeAccess.stateName(state);
+            if (name != null && name.contains("waterlogged=true")) {
+                return y;
+            }
+        }
+        return getMinHeight() - 1;
+    }
+
+    @Override
+    public int getHighestBlockYAt(Location location) {
+        return getHighestBlockYAt(location.getBlockX(), location.getBlockZ());
+    }
+
+    // ----- Weather and game rules
+
+    @Override
+    public void setStorm(boolean storm) {
+        Ctx.check(Host.world_set_weather(Native.plugin, storm ? Abi.weather.RAIN : Abi.weather.CLEAR, -1), "World.setStorm");
+    }
+
+    /** Thunder off clears the weather: the host sets rain, thunder and clear as {@code /weather} does. */
+    @Override
+    public void setThundering(boolean thundering) {
+        Ctx.check(Host.world_set_weather(Native.plugin, thundering ? Abi.weather.THUNDER : Abi.weather.CLEAR, -1),
+                "World.setThundering");
+    }
+
+    private static String ruleName(org.bukkit.GameRule<?> rule) {
+        return rule.getKey().getKey();
+    }
+
+    private String ruleText(String name) {
+        var s = Native.scratch();
+        MemorySegment buf = s.strBuf(256);
+        if (Host.game_rule_get(Native.plugin, s.str(name), buf) != Abi.status.OK) {
+            return null;
+        }
+        return Native.string(buf, true);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public <T> T getGameRuleValue(org.bukkit.GameRule<T> rule) {
+        if (rule instanceof LegacyGameRule<?, T> legacy) {
+            return (T) legacy.toLegacy(getGameRuleValue(legacy.modern));
+        }
+        String text = ruleText(ruleName(rule));
+        if (text == null) {
+            return null;
+        }
+        text = text.strip();
+        return (T) (text.equals("true") || text.equals("false") ? (Object) Boolean.valueOf(text) : (Object) Integer.valueOf(text));
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public String getGameRuleValue(String rule) {
+        return rule == null ? null : ruleText(rule);
+    }
+
+    @Override
+    public <T> boolean setGameRule(org.bukkit.GameRule<T> rule, T value) {
+        if (rule instanceof LegacyGameRule<?, T> legacy) {
+            return setGameRuleValue(ruleName(legacy.modern), String.valueOf(legacy.toModern(value)));
+        }
+        var s = Native.scratch();
+        return Host.game_rule_set(Native.plugin, s.str(ruleName(rule)), s.str(String.valueOf(value))) == Abi.status.OK;
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public boolean setGameRuleValue(String rule, String value) {
+        if (rule == null || value == null) {
+            return false;
+        }
+        var s = Native.scratch();
+        return Host.game_rule_set(Native.plugin, s.str(rule), s.str(value)) == Abi.status.OK;
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public boolean isGameRule(String rule) {
+        return rule != null && ruleText(rule) != null;
+    }
+
+    // ----- Effects in the world
+
+    @Override
+    public org.bukkit.entity.LightningStrike strikeLightning(Location loc) {
+        return (org.bukkit.entity.LightningStrike) spawnType(loc, org.bukkit.entity.EntityType.LIGHTNING_BOLT);
+    }
+
+    // ----- Spawning. The host adds an entity at once: a plugin's function runs on the entity
+    // just after it entered the world, not before as on Paper.
+
+    /** Spawns an entity of a type as {@code /summon} does, turned as the location. */
+    private Entity spawnType(Location loc, org.bukkit.entity.EntityType type) {
+        if (type == null || !type.isSpawnable() || type == org.bukkit.entity.EntityType.PLAYER) {
+            throw new IllegalArgumentException("Cannot spawn an entity of type " + type);
+        }
+        var s = Native.scratch();
+        MemorySegment at = s.alloc(Abi.Vec3.SIZE);
+        at.set(JAVA_DOUBLE, Abi.Vec3.x, loc.getX());
+        at.set(JAVA_DOUBLE, Abi.Vec3.y, loc.getY());
+        at.set(JAVA_DOUBLE, Abi.Vec3.z, loc.getZ());
+        MemorySegment out = s.alloc(Abi.Uuid.SIZE);
+        Ctx.check(Host.entity_spawn(Ctx.current, id, s.str(type.getKey().toString()), at, s.str(""), out),
+                "World.spawn " + type.getKey());
+        Entity entity = VEntity.create(this, Native.uuid(out), type);
+        if (loc.getYaw() != 0 || loc.getPitch() != 0) {
+            entity.teleport(loc);
+        }
+        return entity;
+    }
+
+    private static org.bukkit.entity.EntityType typeOf(Class<?> clazz) {
+        org.bukkit.entity.EntityType fallback = null;
+        for (org.bukkit.entity.EntityType t : org.bukkit.entity.EntityType.values()) {
+            Class<?> c = t.getEntityClass();
+            if (c == clazz) {
+                return t;
+            }
+            if (fallback == null && c != null && t.isSpawnable() && clazz.isAssignableFrom(c)
+                    && clazz != Entity.class && clazz != org.bukkit.entity.LivingEntity.class) {
+                fallback = t;
+            }
+        }
+        return fallback;
+    }
+
+    private <T extends Entity> T spawnClass(Location loc, Class<T> clazz, java.util.function.Consumer<? super T> function) {
+        if (loc == null || clazz == null) {
+            throw new IllegalArgumentException("Location and entity class cannot be null");
+        }
+        org.bukkit.entity.EntityType type = typeOf(clazz);
+        if (type == null) {
+            throw new IllegalArgumentException("Cannot spawn an entity for " + clazz.getName());
+        }
+        T entity = clazz.cast(spawnType(loc, type));
+        if (function != null) {
+            function.accept(entity);
+        }
+        return entity;
+    }
+
+    @Override
+    public Entity spawnEntity(Location loc, org.bukkit.entity.EntityType type, boolean randomizeData) {
+        return spawnType(loc, type);
+    }
+
+    @Override
+    public <T extends Entity> T spawn(Location location, Class<T> clazz, java.util.function.Consumer<? super T> function,
+            org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason reason) {
+        return spawnClass(location, clazz, function);
+    }
+
+    @Override
+    public <T extends Entity> T spawn(Location location, Class<T> clazz, boolean randomizeData,
+            java.util.function.Consumer<? super T> function) {
+        return spawnClass(location, clazz, function);
+    }
+
+    @Override
+    public <T extends org.bukkit.entity.LivingEntity> T spawn(Location location, Class<T> clazz,
+            org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason reason, boolean randomizeData,
+            java.util.function.Consumer<? super T> function) {
+        return spawnClass(location, clazz, function);
+    }
+
+    private boolean explode(double x, double y, double z, float power, boolean fire, boolean breakBlocks, Entity source) {
+        var s = Native.scratch();
+        MemorySegment at = s.alloc(Abi.Vec3.SIZE);
+        at.set(JAVA_DOUBLE, Abi.Vec3.x, x);
+        at.set(JAVA_DOUBLE, Abi.Vec3.y, y);
+        at.set(JAVA_DOUBLE, Abi.Vec3.z, z);
+        int flags = (breakBlocks ? Abi.explode_flag.BREAK_BLOCKS : 0) | (fire ? Abi.explode_flag.FIRE : 0);
+        MemorySegment who = s.uuid(source == null ? new UUID(0, 0) : source.getUniqueId());
+        return Host.explode(Ctx.current, id, at, power, flags, who) == Abi.status.OK;
+    }
+
+    @Override
+    public boolean createExplosion(double x, double y, double z, float power, boolean setFire, boolean breakBlocks,
+            Entity source) {
+        return explode(x, y, z, power, setFire, breakBlocks, source);
+    }
+
+    @Override
+    public boolean createExplosion(Location loc, float power, boolean setFire, boolean breakBlocks, Entity source) {
+        return explode(loc.getX(), loc.getY(), loc.getZ(), power, setFire, breakBlocks, source);
+    }
+
+    @Override
+    public boolean createExplosion(Entity source, Location loc, float power, boolean setFire, boolean breakBlocks,
+            boolean excludeSourceFromDamage) {
+        return explode(loc.getX(), loc.getY(), loc.getZ(), power, setFire, breakBlocks, source);
+    }
+
+    /**
+     * A ray through the blocks (their collision shapes; with {@code ALWAYS} or {@code
+     * SOURCE_ONLY} also fluids). The host knows no block filter: {@code canCollide} and {@code
+     * ignorePassableBlocks} are not applied.
+     */
+    @Override
+    public org.bukkit.util.RayTraceResult rayTraceBlocks(io.papermc.paper.math.Position start, org.bukkit.util.Vector direction,
+            double maxDistance, org.bukkit.FluidCollisionMode fluidCollisionMode, boolean ignorePassableBlocks,
+            java.util.function.Predicate<? super Block> canCollide) {
+        org.bukkit.util.Vector dir = direction.clone().normalize().multiply(maxDistance);
+        var s = Native.scratch();
+        MemorySegment from = s.alloc(Abi.Vec3.SIZE);
+        from.set(JAVA_DOUBLE, Abi.Vec3.x, start.x());
+        from.set(JAVA_DOUBLE, Abi.Vec3.y, start.y());
+        from.set(JAVA_DOUBLE, Abi.Vec3.z, start.z());
+        MemorySegment to = s.alloc(Abi.Vec3.SIZE);
+        to.set(JAVA_DOUBLE, Abi.Vec3.x, start.x() + dir.getX());
+        to.set(JAVA_DOUBLE, Abi.Vec3.y, start.y() + dir.getY());
+        to.set(JAVA_DOUBLE, Abi.Vec3.z, start.z() + dir.getZ());
+        int flags = Abi.raytrace_flag.BLOCKS
+                | (fluidCollisionMode == null || fluidCollisionMode == org.bukkit.FluidCollisionMode.NEVER ? 0
+                        : Abi.raytrace_flag.FLUIDS);
+        MemorySegment hit = s.alloc(Abi.RayHit.SIZE);
+        hit.set(JAVA_INT, Abi.RayHit.size, (int) Abi.RayHit.SIZE);
+        Ctx.check(Host.raytrace(Ctx.current, id, from, to, flags, s.uuid(new UUID(0, 0)), hit), "World.rayTraceBlocks");
+        if (hit.get(JAVA_INT, Abi.RayHit.kind) != Abi.ray_hit.BLOCK) {
+            return null;
+        }
+        org.bukkit.util.Vector point = new org.bukkit.util.Vector(hit.get(JAVA_DOUBLE, Abi.RayHit.pos + Abi.Vec3.x),
+                hit.get(JAVA_DOUBLE, Abi.RayHit.pos + Abi.Vec3.y), hit.get(JAVA_DOUBLE, Abi.RayHit.pos + Abi.Vec3.z));
+        Block block = getBlockAt(hit.get(JAVA_INT, Abi.RayHit.block + Abi.BlockPos.x),
+                hit.get(JAVA_INT, Abi.RayHit.block + Abi.BlockPos.y), hit.get(JAVA_INT, Abi.RayHit.block + Abi.BlockPos.z));
+        org.bukkit.block.BlockFace face = switch (hit.get(JAVA_INT, Abi.RayHit.face)) {
+            case 0 -> org.bukkit.block.BlockFace.DOWN;
+            case 1 -> org.bukkit.block.BlockFace.UP;
+            case 2 -> org.bukkit.block.BlockFace.NORTH;
+            case 3 -> org.bukkit.block.BlockFace.SOUTH;
+            case 4 -> org.bukkit.block.BlockFace.WEST;
+            default -> org.bukkit.block.BlockFace.EAST;
+        };
+        return new org.bukkit.util.RayTraceResult(point, block, face);
+    }
+
+    /** A sound at a place for the players of this world in its range (Vanilla's: 16 blocks, more when louder). */
+    private void sound(String key, int source, double x, double y, double z, float volume, float pitch, long seed) {
+        double range = volume > 1 ? 16.0 * volume : 16.0;
+        for (VPlayer p : Layer.server.players.values()) {
+            if (p.worldId() != id) {
+                continue;
+            }
+            Location at = p.getLocation();
+            double dx = at.getX() - x;
+            double dy = at.getY() - y;
+            double dz = at.getZ() - z;
+            if (dx * dx + dy * dy + dz * dz < range * range) {
+                p.sound(key, source, x, y, z, volume, pitch, seed);
+            }
+        }
+    }
+
+    @Override
+    public void playSound(Location location, org.bukkit.Sound sound, org.bukkit.SoundCategory category, float volume,
+            float pitch, long seed) {
+        if (location != null && sound != null) {
+            sound(VPlayer.soundKey(sound), VPlayer.source(category), location.getX(), location.getY(), location.getZ(),
+                    volume, pitch, seed);
+        }
+    }
+
+    @Override
+    public void playSound(Location location, org.bukkit.Sound sound, org.bukkit.SoundCategory category, float volume,
+            float pitch) {
+        playSound(location, sound, category, volume, pitch, java.util.concurrent.ThreadLocalRandom.current().nextLong());
+    }
+
+    @Override
+    public void playSound(Location location, String sound, org.bukkit.SoundCategory category, float volume, float pitch,
+            long seed) {
+        if (location != null && sound != null) {
+            sound(sound, VPlayer.source(category), location.getX(), location.getY(), location.getZ(), volume, pitch, seed);
+        }
+    }
+
+    @Override
+    public void playSound(Location location, String sound, org.bukkit.SoundCategory category, float volume, float pitch) {
+        playSound(location, sound, category, volume, pitch, java.util.concurrent.ThreadLocalRandom.current().nextLong());
+    }
+
+    @Override
+    public void playSound(Entity entity, org.bukkit.Sound sound, org.bukkit.SoundCategory category, float volume, float pitch,
+            long seed) {
+        playSound(entity.getLocation(), sound, category, volume, pitch, seed);
+    }
+
+    @Override
+    public void playSound(Entity entity, org.bukkit.Sound sound, org.bukkit.SoundCategory category, float volume, float pitch) {
+        playSound(entity.getLocation(), sound, category, volume, pitch);
+    }
+
+    @Override
+    public void playSound(Entity entity, String sound, org.bukkit.SoundCategory category, float volume, float pitch,
+            long seed) {
+        playSound(entity.getLocation(), sound, category, volume, pitch, seed);
+    }
+
+    @Override
+    public void playSound(Entity entity, String sound, org.bukkit.SoundCategory category, float volume, float pitch) {
+        playSound(entity.getLocation(), sound, category, volume, pitch);
+    }
+
+    // ----- Metadata (Metadatable), kept for the server's lifetime
+
+    private final java.util.Map<String, List<org.bukkit.metadata.MetadataValue>> metadata =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    @Override
+    public void setMetadata(String key, org.bukkit.metadata.MetadataValue value) {
+        var owner = value.getOwningPlugin();
+        if (owner == null) {
+            throw new IllegalArgumentException("Plugin cannot be null");
+        }
+        var values = metadata.computeIfAbsent(key, k -> new java.util.concurrent.CopyOnWriteArrayList<>());
+        values.removeIf(v -> v.getOwningPlugin() == owner);
+        values.add(value);
+    }
+
+    @Override
+    public List<org.bukkit.metadata.MetadataValue> getMetadata(String key) {
+        var values = metadata.get(key);
+        return values == null ? List.of() : List.copyOf(values);
+    }
+
+    @Override
+    public boolean hasMetadata(String key) {
+        var values = metadata.get(key);
+        return values != null && !values.isEmpty();
+    }
+
+    @Override
+    public void removeMetadata(String key, org.bukkit.plugin.Plugin owner) {
+        var values = metadata.get(key);
+        if (values != null) {
+            values.removeIf(v -> v.getOwningPlugin() == owner);
         }
     }
 
